@@ -7,12 +7,15 @@ import googlemaps
 from datetime import datetime
 from dotenv import load_dotenv
 from src.utils.onemap_auth import get_valid_token
+import pandas as pd
 
 load_dotenv()
 
 one_map_route = Blueprint('one_map_route', __name__)
 ONEMAP_BASE_URL = "https://www.onemap.gov.sg/api/public/routingsvc/route"
 gmaps = googlemaps.Client(os.getenv("GOOGLE_MAPS_API_KEY"))
+shapes_df = pd.read_csv("shapes.txt")
+bus_route = Blueprint('bus_route', __name__)
 
 def get_bus_trip_segment_by_stop(start_stop, end_stop):
     try:
@@ -69,7 +72,7 @@ def get_onemap_route():
         "time": time,
         "mode": "BUS",          # Transit includes bus/train/mrt
         #"maxWalkDistance": "1000",  # Max walking distance in meters
-        "numItineraries": "3"       # Number of route options to return
+        "numItineraries": "5"       # Number of route options to return
     }
 
     headers = {
@@ -276,3 +279,38 @@ def get_unique_end_area_codes():
     }
 
     return jsonify(AREA_CODES), 200
+
+def get_bus_route():
+    service = request.args.get("service")
+    if not service:
+        return jsonify({"error": "Missing ?service=BUS_NUMBER"}), 400
+
+    # Match shape_ids beginning with service number
+    service_prefix = service + ":"
+    matched = shapes_df[shapes_df["shape_id"].str.startswith(service_prefix)]
+
+    if matched.empty:
+        return jsonify({"error": f"No route found for bus service {service}"}), 404
+
+    # Extract direction from shape_id (vectorized operation)
+    matched = matched.copy()  # Avoid SettingWithCopyWarning
+    matched["direction"] = matched["shape_id"].str.split(":").str[-1].str.split("_").str[0].astype(int)
+
+    # Pre-sort by direction and sequence for efficient groupby
+    matched = matched.sort_values(["direction", "shape_pt_sequence"])
+
+    # Build routes
+    merged_routes = []
+    for direction, group in matched.groupby("direction", sort=False):
+        # Already sorted, so no need to sort again
+        coords = group[["shape_pt_lat", "shape_pt_lon"]].values.tolist()
+        
+        merged_routes.append({
+            "direction": direction,  # Already int from astype
+            "coordinates": coords
+        })
+
+    return jsonify({
+        "service": service,
+        "directions": merged_routes
+    }), 200
