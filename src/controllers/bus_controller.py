@@ -8,13 +8,15 @@ from datetime import datetime
 from dotenv import load_dotenv
 from src.utils.onemap_auth import get_valid_token
 import pandas as pd
+from pathlib import Path
 
 load_dotenv()
 
+ROOT_DIR = Path(__file__).resolve().parents[2]
 one_map_route = Blueprint('one_map_route', __name__)
 ONEMAP_BASE_URL = "https://www.onemap.gov.sg/api/public/routingsvc/route"
 gmaps = googlemaps.Client(os.getenv("GOOGLE_MAPS_API_KEY"))
-shapes_df = pd.read_csv("shapes.txt")
+shapes_df = pd.read_csv(ROOT_DIR/"shapes.txt")
 bus_route = Blueprint('bus_route', __name__)
 
 def get_bus_trip_segment_by_stop(start_stop, end_stop):

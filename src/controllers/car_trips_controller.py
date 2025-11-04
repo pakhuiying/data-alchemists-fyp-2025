@@ -6,12 +6,30 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 from src.utils.onemap_auth import get_valid_token
+import osmnx as ox
+from shapely import wkb
+import geopandas as gpd
+import pandas as pd
+from pathlib import Path
+from shapely.geometry import LineString
+import networkx as nx
+import copy
 
 load_dotenv()
-
+ROOT_DIR = Path(__file__).resolve().parents[2]
 one_map_route = Blueprint('one_map_route', __name__)
 ONEMAP_BASE_URL = "https://www.onemap.gov.sg/api/public/routingsvc/route"
 gmaps = googlemaps.Client(os.getenv("GOOGLE_MAPS_API_KEY"))
+G = ox.load_graphml(ROOT_DIR/"SG_car_network.graphml")
+flood_events_df = pd.read_csv(ROOT_DIR/"flood_events_rows.csv")
+
+flood_events_df['geom_parsed'] = flood_events_df['geom'].apply(
+    lambda g: wkb.loads(bytes.fromhex(g))
+)
+
+
+flood_buffers = gpd.GeoSeries(flood_events_df['geom_parsed']).buffer(0.00090)
+
 
 # def get_all_car_trips_flooded():
 #     response = supabase.table('car_trips_flooded').select('*').execute()
@@ -87,102 +105,155 @@ def get_all_car_trips_by_id():
 
     return jsonify(response.data), 200
 
-def get_onemap_car_route():
+def compute_detour_route(G, node_route, flooded_segments):
+    if not flooded_segments:
+        return None  
+
+  
+    G_detour = copy.deepcopy(G)
+
+
+    PENALTY_FACTOR = 1000
+
+    for seg in flooded_segments:
+        road_geom = seg["geometry"]
+        for u, v, key, data in G.edges(keys=True, data=True):
+            geom = data.get("geometry")
+            if geom and geom.wkt == road_geom:
+                if "length" in data:
+                    data["length"] = data["length"] * PENALTY_FACTOR
+
+    try:
+       
+        orig_node = node_route[0]
+        dest_node = node_route[-1]
+        new_node_route = nx.shortest_path(G_detour, orig_node, dest_node, weight="length")
+        return new_node_route
+    except:
+        return None  
+
+def get_car_route():
     start_address = request.args.get('start_address')
     end_address = request.args.get('end_address')
+
     if not start_address or not end_address:
         return jsonify({"error": "start_address and end_address are required"}), 400
 
-    token = get_valid_token()
-    if not token:
-        return jsonify({"error": "OneMap API key missing. Could not retrieve OneMap token."}), 500
+ 
+    def geocode_address(address):
+        result = gmaps.geocode(address)
+        if not result:
+            return None
+        return {
+            'lat': result[0]['geometry']['location']['lat'],
+            'lon': result[0]['geometry']['location']['lng']
+        }
+
+    start = geocode_address(start_address)
+    end = geocode_address(end_address)
+    if not start or not end:
+        return jsonify({"error": "Could not geocode one or both addresses"}), 404
 
     try:
-        from concurrent.futures import ThreadPoolExecutor
-        
-        def geocode_address(address):
-            result = gmaps.geocode(address)
-            if not result:
-                return None
-            return {
-                'lat': result[0]['geometry']['location']['lat'],
-                'lon': result[0]['geometry']['location']['lng']
-            }
-        
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            future_start = executor.submit(geocode_address, start_address)
-            future_end = executor.submit(geocode_address, end_address)
-            
-            start_coords = future_start.result()
-            end_coords = future_end.result()
-        
-        if not start_coords:
-            return jsonify({"error": "Start address not found"}), 404
-        if not end_coords:
-            return jsonify({"error": "End address not found"}), 404
-        
-        start_lat, start_lon = start_coords['lat'], start_coords['lon']
-        end_lat, end_lon = end_coords['lat'], end_coords['lon']
-        
-        print(f"Start: {start_lat}, {start_lon}; End: {end_lat}, {end_lon}")
+        orig_node = ox.distance.nearest_nodes(G, start['lon'], start['lat'])
+        dest_node = ox.distance.nearest_nodes(G, end['lon'], end['lat'])
+        node_route = nx.shortest_path(G, orig_node, dest_node, weight="length")
+    except:
+        return jsonify({"error": "Could not compute route using GraphML"}), 500
 
-        tolerance = 0.0018  # 180m radius
-        
-        def fetch_onemap():
-            params = {
-                "start": f"{start_lat},{start_lon}",
-                "end": f"{end_lat},{end_lon}",
-                "routeType": "drive"
-            }
-            headers = {"Authorization": token}
-            response = requests.get(ONEMAP_BASE_URL, headers=headers, params=params, timeout=15)
-            return response
-        
-        def fetch_supabase():
-            return supabase.table("car_trips").select("*") \
-                .gte("start_lat", start_lat - tolerance) \
-                .lte("start_lat", start_lat + tolerance) \
-                .gte("start_lon", start_lon - tolerance) \
-                .lte("start_lon", start_lon + tolerance) \
-                .gte("end_lat", end_lat - tolerance) \
-                .lte("end_lat", end_lat + tolerance) \
-                .gte("end_lon", end_lon - tolerance) \
-                .lte("end_lon", end_lon + tolerance) \
-                .execute()
-        
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            future_onemap = executor.submit(fetch_onemap)
-            future_supabase = executor.submit(fetch_supabase)
-            
-            response = future_onemap.result()
-            supabase_response = future_supabase.result()
-        
-        if response.status_code != 200:
-            return jsonify({
-                "error": "OneMap API request failed",
-                "status_code": response.status_code,
-                "details": response.text
-            }), response.status_code
-        
-        data = response.json()
-        data['overall_route_status'] = "clear"
-        
-        if supabase_response.data and len(supabase_response.data) > 0:
-            trip = supabase_response.data[0]
-            data['overall_route_status'] = "flooded"
-            data["time_travel_simulation"] = {
-                "81kph_total_duration": trip.get("81kph_total_duration"),
-                "72kph_total_duration": trip.get("72kph_total_duration"),
-                "45kph_total_duration": trip.get("45kph_total_duration"),
-                "20kph_total_duration": trip.get("20kph_total_duration"),
-                "10kph_total_duration": trip.get("10kph_total_duration"),
-                "5kph_total_duration": trip.get("5kph_total_duration"),
-                "90kph_total_duration": trip.get("90kph_total_duration"),
-            }
-        
-        return jsonify(data), 200
+    route_coords = [(G.nodes[n]['y'], G.nodes[n]['x']) for n in node_route]
 
-    except requests.exceptions.Timeout:
-        return jsonify({"error": "OneMap API request timed out"}), 504
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # --- Flood + Speed Delay ---
+    speeds = {
+        "5kph": 5, "10kph": 10, "20kph": 20,
+        "45kph": 45, "72kph": 72, "81kph": 81,
+        "90kph": 90  # baseline
+    }
+
+    flooded_segments = []
+    total_delay = {k: 0 for k in speeds.keys()}
+    route_total_length_m = 0
+
+    for u, v in zip(node_route[:-1], node_route[1:]):
+        edge = G.get_edge_data(u, v, 0)
+        if not edge or "length" not in edge:
+            continue
+
+        length_m = edge["length"]
+        route_total_length_m += length_m
+
+        geom = edge.get("geometry")
+        if geom:
+            geom = LineString([(pt[0], pt[1]) for pt in geom.coords])
+        else:
+            geom = LineString([(G.nodes[u]['x'], G.nodes[u]['y']),
+                               (G.nodes[v]['x'], G.nodes[v]['y'])])
+
+        flooded = any(geom.intersects(b) for b in flood_buffers)
+        if flooded:
+            delays = {}
+            for label, speed in speeds.items():
+                speed_mps = speed * 1000 / 3600
+                time_sec = length_m / speed_mps
+                delays[label] = time_sec
+
+            normal = delays["90kph"]
+            for label in speeds.keys():
+                delay = delays[label] - normal
+                delays[label + "_delay"] = delay
+                total_delay[label] += delay
+
+            flooded_segments.append({
+                "road_name": edge.get("name", "Unnamed Road"),
+                "geometry": geom.wkt,
+                "length_m": length_m,
+                "travel_time_seconds": delays
+            })
+
+    normal_time_sec = route_total_length_m / (90 * 1000 / 3600)
+
+    estimated_total_travel_time_seconds = {}
+    for label, delay_val in total_delay.items():
+        estimated_total_travel_time_seconds[label] = normal_time_sec + delay_val
+
+    detour_node_route = compute_detour_route(G, node_route, flooded_segments)
+
+    if detour_node_route:
+        detour_coords = [(G.nodes[n]['y'], G.nodes[n]['x']) for n in detour_node_route]
+        detour_length_m = sum(
+            G.get_edge_data(u, v, 0).get("length", 0)
+            for u, v in zip(detour_node_route[:-1], detour_node_route[1:])
+        )
+        detour_total_travel_time_seconds = {
+            label: detour_length_m / (speed * 1000 / 3600)
+            for label, speed in speeds.items()
+        }
+        has_detour = True
+    else:
+        detour_coords = None
+        detour_total_travel_time_seconds = None
+        has_detour = False
+
+    detour_comparison = {}
+    if has_detour:
+        for label in speeds.keys():
+            flooded_time = estimated_total_travel_time_seconds[label]
+            detour_time = detour_total_travel_time_seconds[label]
+            detour_comparison[label] = {
+                "flooded_route_time_sec": flooded_time,
+                "detour_route_time_sec": detour_time,
+                "difference_sec": detour_time - flooded_time
+            }
+
+    return jsonify({
+        "route_geometry": route_coords,
+        "overall_route_status": "flooded" if flooded_segments else "clear",
+        "flooded_segments": flooded_segments,
+        "total_delay_seconds": total_delay,
+        "normal_travel_time_seconds": normal_time_sec,
+        "estimated_total_travel_time_seconds": estimated_total_travel_time_seconds,
+        "has_detour": has_detour,
+        "detour_route_geometry": detour_coords,
+        "detour_total_travel_time_seconds": detour_total_travel_time_seconds,
+        "detour_comparison": detour_comparison
+    }), 200
