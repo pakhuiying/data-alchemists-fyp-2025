@@ -1,11 +1,11 @@
 from flask import Flask
 from flask_cors import CORS
-
+import osmnx as ox
 from dotenv import load_dotenv
 from flasgger import Swagger
 import os
 
-
+from src.routes.critical_road_segment_routes import critical_roads_route
 from src.routes.car_trips_routes import car_trips_route
 from src.routes.bus_routes import bus_route
 from src.routes.flood_events_routes import flood_events_route
@@ -13,7 +13,7 @@ from src.routes.traffic_routes import traffic_route
 from src.utils.onemap_auth import get_valid_token, refresh_onemap_token
 from apscheduler.schedulers.background import BackgroundScheduler
 
-
+G = ox.load_graphml("SG_bus_network.graphml")
 def create_app():
     app = Flask(__name__,template_folder="src/templates")
     load_dotenv()
@@ -26,6 +26,7 @@ def create_app():
     app.register_blueprint(bus_route)
     app.register_blueprint(flood_events_route)
     app.register_blueprint(traffic_route)
+    app.register_blueprint(critical_roads_route)
     CORS(app, origins=["https://data-alchemists-fyp-2025.onrender.com"])
     scheduler = BackgroundScheduler()
     scheduler.add_job(refresh_onemap_token, 'interval', days=2)
@@ -35,4 +36,5 @@ def create_app():
 
 if __name__ == '__main__':
     app=create_app()
+
     app.run(debug=True, host='0.0.0.0', port=5000)
