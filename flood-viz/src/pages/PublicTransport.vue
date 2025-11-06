@@ -193,8 +193,10 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
       directions
     })
 
-    store.setColoredPolylines?.(directions.flatMap((d: any) => d.polylines || []))
-    store.fitToOverlayBounds?.()
+    ;(store as any).setColoredPolylines?.(
+      directions.flatMap((d: any) => d.polylines || [])
+      )
+    ;(store as any).fitToOverlayBounds?.()
   } catch (e: any) {
     console.error(e)
     alert(`Failed to load route for ${serviceNo}: ${e?.message || e}`)
