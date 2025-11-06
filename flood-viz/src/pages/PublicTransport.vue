@@ -7,7 +7,7 @@ import ControlsPanel from '@/components/ControlsPanel.vue'
 import MapCanvas from '@/components/MapCanvas.vue'
 import TravelTimeBarChart from '@/components/TravelTimeBarChart.vue'
 import { useUrlStateSync } from '@/components/useUrlStateSync'
-import { getBusesAffectedByFloods } from '@/api/api'
+import { getBusesAffectedByFloods, getBusRouteByService } from '@/api/api'  /* ← added */
 
 useUrlStateSync()
 const store = useAppStore()
@@ -120,6 +120,86 @@ watch(
     if (tab !== 'flood') clearFloodUI()
   }
 )
+
+/* ========= NEW: helpers to draw a service route when a list item is clicked ========= */
+const BASE_COLOR = '#2563eb'
+const FLOODED_COLOR = '#dc2626'
+
+// Remove consecutive duplicate points
+function dedupeConsecutive(points: [number, number][]) {
+  const out: [number, number][] = []
+  let prev: string | null = null
+  for (const p of points) {
+    const key = `${p[0].toFixed(7)},${p[1].toFixed(7)}`
+    if (key !== prev) out.push(p)
+    prev = key
+  }
+  return out
+}
+
+// Build polylines from backend geometry (supports flooded_spans)
+function buildColoredPolylinesFromDirection(d: {
+  coordinates: [number, number][],
+  flooded_spans?: Array<[number, number]>
+}) {
+  const coords = dedupeConsecutive(d.coordinates || [])
+  if (!coords.length) return []
+  if (Array.isArray(d.flooded_spans) && d.flooded_spans.length) {
+    const mask = new Array(coords.length).fill(false)
+    for (const [a, b] of d.flooded_spans) {
+      const lo = Math.max(0, Math.min(a, b))
+      const hi = Math.min(coords.length - 1, Math.max(a, b))
+      for (let i = lo; i <= hi; i++) mask[i] = true
+    }
+    const out: Array<{ path:[number,number][], color:string, flooded:boolean }> = []
+    let runStart = 0
+    for (let i = 1; i <= coords.length; i++) {
+      if (i === coords.length || mask[i] !== mask[i-1]) {
+        const seg = coords.slice(runStart, i)
+        if (seg.length >= 2) {
+          out.push({ path: seg, color: mask[i-1] ? FLOODED_COLOR : BASE_COLOR, flooded: !!mask[i-1] })
+        }
+        runStart = i
+      }
+    }
+    return out
+  }
+  return [{ path: coords, color: BASE_COLOR, flooded: false }]
+}
+
+async function drawServiceRouteFromBackend(serviceNo: string | number) {
+  if (!serviceNo) return
+  try {
+    const resp = await getBusRouteByService(serviceNo)
+    const directions = (resp?.directions || []).map((d: any) => {
+      const polylines = buildColoredPolylinesFromDirection(d)
+      const points = dedupeConsecutive(d.coordinates || [])
+      return {
+        dir: Number(d.direction ?? 1),
+        points,
+        stopCodes: [],
+        roadPath: points,
+        polylines,
+      }
+    })
+
+    if (!directions.length) {
+      alert(`No geometry for service ${serviceNo}`)
+      return
+    }
+
+    store.setServiceRouteOverlay?.({
+      serviceNo: String(resp?.service ?? serviceNo),
+      directions
+    })
+
+    store.setColoredPolylines?.(directions.flatMap((d: any) => d.polylines || []))
+    store.fitToOverlayBounds?.()
+  } catch (e: any) {
+    console.error(e)
+    alert(`Failed to load route for ${serviceNo}: ${e?.message || e}`)
+  }
+}
 </script>
 
 <template>
@@ -259,7 +339,10 @@ watch(
                 <li
                   v-for="svc in affectedServices"
                   :key="svc"
-                  class="px-3 py-2 border border-[#007b3a]/20 rounded-lg text-[13px] bg-[#f9fff9] flex items-center justify-between"
+                  class="px-3 py-2 border border-[#007b3a]/20 rounded-lg text-[13px] bg-[#f9fff9] flex items-center justify-between
+                         hover:bg-[#eefcf2] cursor-pointer transition-colors"
+                  @click="drawServiceRouteFromBackend(svc)"   
+                  title="Show this service route on the map"
                 >
                   <div class="font-semibold text-[#007b3a] flex items-center gap-2">
                     <span
@@ -269,6 +352,19 @@ watch(
                     </span>
                     <span>Service {{ svc }}</span>
                   </div>
+
+                  <svg
+                    class="h-4 w-4 text-gray-400"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M7.21 14.77a.75.75 0 0 1-.02-1.06L10.17 10 7.2 6.29a.75.75 0 1 1 1.1-1.02l3.5 3.75a.75.75 0 0 1 0 1.02l-3.5 3.75a.75.75 0 0 1-1.08-.02z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
                 </li>
               </ul>
             </div>
