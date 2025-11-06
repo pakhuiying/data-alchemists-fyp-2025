@@ -54,6 +54,9 @@ const PATHS = {
   roadMaxTrafficFlow: '/road_max_traffic_flow',                // GET
   roadMaxTrafficFlowById: (id: number) => `/road_max_traffic_flow/${id}`, // GET
 
+  //Bus Service
+  busRoute: '/bus/route', // GET ?service=10
+
 
   busTripsDelay: '/bus_trips/delay',
 
@@ -173,6 +176,23 @@ export type UniqueFloodEvent = {
   longitude: number
   time_travel_delay_min: number
 }
+
+// Bus Service Number Route fetcher
+export async function getBusRouteByService(service: string | number): Promise<{
+  service: string;
+  directions: Array<{
+    direction: number;  // 0 or 1
+    coordinates: [number, number][];
+    // OPTIONAL (if backend returns it): mark flooded spans
+    // Either as index pairs...
+    flooded_spans?: Array<[number, number]>;
+    // ...or a boolean per point (same length as coordinates)
+    flooded_flags?: boolean[];
+  }>;
+}> {
+  return await getJSON<any>(PATHS.busRoute, { service });
+}
+
 
 /** Raw fetch of unique flood events with delay from backend */
 export async function getUniqueFloodEventsByLocation(

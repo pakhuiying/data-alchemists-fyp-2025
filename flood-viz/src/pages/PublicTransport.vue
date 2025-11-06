@@ -13,11 +13,11 @@ useUrlStateSync()
 const store = useAppStore()
 
 /* ─────────────────────────────
-   ACTIVE TAB: 'route' | 'itinerary' | 'flood'
+   ACTIVE TAB: 'itinerary' | 'flood'
    ───────────────────────────── */
-const activeTab = ref<'route' | 'itinerary' | 'flood'>('route')
+const activeTab = ref<'itinerary' | 'flood'>('itinerary')
 
-function setTab(tab: 'route' | 'itinerary' | 'flood') {
+function setTab(tab: 'itinerary' | 'flood') {
   activeTab.value = tab
 
   // map-layer visibility rules
@@ -25,7 +25,7 @@ function setTab(tab: 'route' | 'itinerary' | 'flood') {
     store.setLayerVisible('stops', false)
     store.setLayerVisible('floodEvents', true)
   } else {
-    // route / itinerary tab
+    // itinerary tab
     store.setLayerVisible('stops', true)
     store.setLayerVisible('floodEvents', false)
     clearFloodUI()
@@ -154,28 +154,13 @@ watch(
           </div>
         </div>
 
-        <!-- TAB SWITCHER -->
+        <!-- TAB SWITCHER (Itinerary / Flood only) -->
         <div
           class="rounded-2xl shadow-inner bg-gradient-to-r from-[#007b3a]/10 to-[#00b36b]/10 border border-[#007b3a]/20 p-3"
         >
-          <div class="grid grid-cols-3 gap-2 text-[13px] font-semibold">
-            <!-- Best Route -->
-            <button
-              class="py-2 rounded-lg transition-all duration-200 leading-snug text-center"
-              :class="activeTab === 'route'
-                ? 'bg-[#007b3a] text-white shadow-md shadow-[#007b3a]/30'
-                : 'bg-white text-[#007b3a] border border-[#007b3a]/30 hover:bg-[#f0fdf4]'"
-              @click="setTab('route')"
-            >
-              <div class="flex flex-col">
-                <span class="flex items-center justify-center gap-1">
-                  <span class="text-[14px]">🚏</span>
-                  <span>Best Route</span>
-                </span>
-              </div>
-            </button>
+          <div class="grid grid-cols-2 gap-2 text-[13px] font-semibold">
 
-            <!-- Best Itinerary -->
+            <!-- Itinerary -->
             <button
               class="py-2 rounded-lg transition-all duration-200 leading-snug text-center"
               :class="activeTab === 'itinerary'
@@ -214,28 +199,11 @@ watch(
         <div
           class="rounded-2xl border border-gray-200/70 bg-white/90 shadow-sm backdrop-blur-sm px-4 py-4 min-h-[240px] flex flex-col"
         >
-          <!-- ROUTE TAB -->
-          <template v-if="activeTab === 'route'">
-            <div class="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-3">
-              <span class="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#007b3a] text-white text-xs font-bold shadow">
-                1
-              </span>
-              <span>Plan fastest bus route</span>
-            </div>
-
-            <!-- Your original stop form lives in StopDetailsPanel -->
-            <StopDetailsPanel mode="route" />
-
-            <p class="text-[11px] text-gray-500 mt-4 leading-snug">
-              Tip: Choose start/end stops or search by address to see suggested service and travel time.
-            </p>
-          </template>
-
           <!-- ITINERARY TAB -->
-          <template v-else-if="activeTab === 'itinerary'">
+          <template v-if="activeTab === 'itinerary'">
             <div class="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-3">
               <span class="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#6a1b9a] text-white text-xs font-bold shadow">
-                2
+                1
               </span>
               <span>Compare itineraries</span>
             </div>
