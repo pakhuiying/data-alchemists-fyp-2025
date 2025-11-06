@@ -167,19 +167,66 @@ function buildColoredPolylinesFromDirection(d: {
   return [{ path: coords, color: BASE_COLOR, flooded: false }]
 }
 
+/* --- OSRM helpers (road snapping) --- */
+type OsrmRoute = { path: [number, number][], distance_m: number, duration_s: number }
+
+async function osrmRouteVia(pointsLatLon: [number, number][], signal?: AbortSignal): Promise<OsrmRoute | null> {
+  if (!pointsLatLon || pointsLatLon.length < 2) return null
+  const coords = pointsLatLon.map(([lat, lon]) => `${lon},${lat}`).join(';')
+  const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`
+  const r = await fetch(url, { signal })
+  if (!r.ok) return null
+  const j = await r.json()
+  const route = j?.routes?.[0]
+  const line = route?.geometry?.coordinates
+  if (!Array.isArray(line)) return null
+  return {
+    path: line.map(([lon, lat]: [number, number]) => [lat, lon]),
+    distance_m: Number(route?.distance ?? 0),
+    duration_s: Number(route?.duration ?? 0),
+  }
+}
+async function osrmRouteViaChunked(points: [number,number][], chunkSize = 90, signal?: AbortSignal): Promise<OsrmRoute | null> {
+  if (points.length <= chunkSize) return await osrmRouteVia(points, signal)
+  const pieces: OsrmRoute[] = []
+  for (let i = 0; i < points.length - 1; i += (chunkSize - 1)) {
+    const slice = points.slice(i, Math.min(points.length, i + chunkSize))
+    if (slice.length >= 2) {
+      const seg = await osrmRouteVia(slice, signal)
+      if (seg && seg.path.length) pieces.push(seg)
+    }
+    await new Promise(r => setTimeout(r, 40))
+  }
+  if (!pieces.length) return null
+  const joined: [number,number][] = []
+  let dist = 0, dura = 0
+  for (let i = 0; i < pieces.length; i++) {
+    const seg = pieces[i]
+    if (!seg?.path?.length) continue
+    if (i === 0) joined.push(...seg.path)
+    else joined.push(...seg.path.slice(1))
+    dist += seg.distance_m
+    dura += seg.duration_s
+  }
+  return { path: joined, distance_m: dist, duration_s: dura }
+}
+
 async function drawServiceRouteFromBackend(serviceNo: string | number) {
   if (!serviceNo) return
   try {
     const resp = await getBusRouteByService(serviceNo)
+
+    // Start from backend geometry
     const directions = (resp?.directions || []).map((d: any) => {
-      const polylines = buildColoredPolylinesFromDirection(d)
       const points = dedupeConsecutive(d.coordinates || [])
+      const polylines = buildColoredPolylinesFromDirection(d) // initial (may be off-road)
       return {
         dir: Number(d.direction ?? 1),
         points,
         stopCodes: [],
-        roadPath: points,
-        polylines,
+        roadPath: points,          // temp; will replace after OSRM
+        polylines,                 // temp; will replace after OSRM
+        flooded_spans: d.flooded_spans,
       }
     })
 
@@ -188,14 +235,41 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
       return
     }
 
+    // Snap each direction to roads via OSRM
+    await Promise.all(directions.map(async (d: any) => {
+      if (!Array.isArray(d.points) || d.points.length < 2) return
+      const estimatedLen = d.points.length * 24
+      const useChunked = estimatedLen > 7000
+      const res = useChunked
+        ? await osrmRouteViaChunked(d.points, 90)
+        : await osrmRouteVia(d.points).catch(() => osrmRouteViaChunked(d.points, 90))
+
+      if (res && res.path.length >= 2) {
+        d.roadPath   = res.path
+        // draw the snapped road path; if you want flood coloring on the snapped path,
+        // keep it simple for now and color all blue (or add a proportional remap later).
+        d.polylines  = [{ path: res.path, color: BASE_COLOR, flooded: false }]
+        d.distance_m = res.distance_m
+        d.duration_s = res.duration_s
+      }
+    }))
+
+    // push to map
     store.setServiceRouteOverlay?.({
       serviceNo: String(resp?.service ?? serviceNo),
-      directions
+      directions: directions.map((d:any) => ({
+        dir: d.dir,
+        points: d.points,
+        stopCodes: d.stopCodes,
+        roadPath: d.roadPath,
+        duration_s: d.duration_s,
+        distance_m: d.distance_m
+      }))
     })
 
     ;(store as any).setColoredPolylines?.(
       directions.flatMap((d: any) => d.polylines || [])
-      )
+    )
     ;(store as any).fitToOverlayBounds?.()
   } catch (e: any) {
     console.error(e)
