@@ -30,6 +30,8 @@ const PATHS = {
   //Critical Segments
   criticalSegmentsNearFlood: '/critical-segments',  // GET ?flood_id=&buffer_m=
   uniqueFloodEventsLocation: '/unique-flood-events/location', 
+  topCriticalSegments: '/top_critical_segments',          // GET ?limit=50
+  roadCriticality: '/road_criticality',                    // GET ?road_name=
 
   // bus data (your existing Flask routes)
   busStops: '/bus_stops',                                      // GET
@@ -293,6 +295,34 @@ export type CriticalSegmentsNearFloodResponse = {
   flood_point: Wgs84Point
   count_critical_segments: number
   critical_segments: CriticalSegment[]
+}
+
+export type RoadCriticalityFeatureProps = {
+  betweenness: number
+  is_critical: boolean
+  key: number
+  length: number
+  norm_betweenness: number
+  rank: number
+  road_name: string | null
+  road_type: string
+  u: number | string
+  v: number | string
+}
+
+// 3) Fetchers — place near your other exported API helpers
+export async function getTopCriticalSegments(limit = 50) {
+  return await getJSON<FeatureCollection<FeatureLineString<RoadCriticalityFeatureProps>>>(
+    PATHS.topCriticalSegments,
+    { limit }
+  )
+}
+
+export async function getRoadCriticality(road_name: string) {
+  return await getJSON<FeatureCollection<FeatureLineString<RoadCriticalityFeatureProps>>>(
+    PATHS.roadCriticality,
+    { road_name }
+  )
 }
 
 // --- 3) Fetcher (robust against NaN in backend JSON) ---
