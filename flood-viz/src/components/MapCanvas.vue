@@ -137,7 +137,7 @@ function buildFloodTooltip(detail: any, fallback: { id?: any, name?: string } = 
   </div>`
 }
 
-/* ================= Colored service polylines (kept intact) ================= */
+/* ================= Colored service polylines (routes vs flooded) ================= */
 let coloredPolylinesGroup: L.LayerGroup | null = null
 function ensureColoredGroup() {
   if (!coloredPolylinesGroup) coloredPolylinesGroup = L.layerGroup().addTo(map)
@@ -147,11 +147,25 @@ function setColoredPolylines(pl: Array<{ path:[number,number][], color:string, f
   ensureColoredGroup()
   clearColoredPolylines()
   if (!pl?.length) return
+
+  // draw non-flooded first, flooded last (so reds go on top)
+  const ordered = [...pl].sort((a, b) => Number(a.flooded) - Number(b.flooded))
+
   const all: L.LatLngExpression[] = []
-  for (const seg of pl) {
+  for (const seg of ordered) {
     const latlngs = seg.path.map(([lat, lon]) => [lat, lon] as [number, number])
-    L.polyline(latlngs, { color: seg.color, weight: 8, opacity: 0.92, lineCap: 'round', lineJoin: 'round' })
-      .addTo(coloredPolylinesGroup!)
+
+    const poly = L.polyline(latlngs, {
+      color: seg.color,
+      weight: seg.flooded ? 8 : 6,
+      opacity: 0.92,
+      lineCap: 'round',
+      lineJoin: 'round',
+      pane: seg.flooded ? 'pane-flooded' : 'pane-routes',
+    }).addTo(coloredPolylinesGroup!)
+
+    if (seg.flooded) (poly as any).bringToFront?.() // belt & suspenders
+
     all.push(...latlngs)
   }
   const b = all.length ? L.latLngBounds(all as any) : null
@@ -182,7 +196,7 @@ function ensureMap() {
   if (map) return
 
   const token = import.meta.env.VITE_MAPBOX_TOKEN
-  const styleId = 'mapbox/streets-v12' // you can switch to 'mapbox/dark-v11', etc.
+  const styleId = 'mapbox/streets-v12'
 
   map = L.map(mapEl.value as HTMLDivElement, {
     center: [1.3521, 103.8198],
@@ -190,7 +204,6 @@ function ensureMap() {
     zoomControl: true,
   })
 
-  // ✅ Correct, type-safe way to inject the token into the URL
   const url = `https://api.mapbox.com/styles/v1/${styleId}/tiles/512/{z}/{x}/{y}@2x?access_token=${token}`
 
   L.tileLayer(url, {
@@ -201,6 +214,13 @@ function ensureMap() {
       '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors ' +
       '&copy; <a href="https://www.mapbox.com/">Mapbox</a>',
   }).addTo(map)
+
+  // --- drawing order panes ---
+  map.createPane('pane-routes')
+  map.getPane('pane-routes')!.style.zIndex = '410'   // base routes
+
+  map.createPane('pane-flooded')
+  map.getPane('pane-flooded')!.style.zIndex = '420'  // flooded overlays (on top)
 }
 
 /* Clearers */
@@ -262,8 +282,15 @@ function renderRoadSegmentFromDetail(detail: any): L.LatLngBounds | null {
   if (roadSegmentLayer) { map.removeLayer(roadSegmentLayer); roadSegmentLayer = null }
 
   const group = L.layerGroup()
-  // 🔴 Flooded segments styled in red, bold line
-  const baseStyle: L.PolylineOptions = { color: '#dc2626', weight: 8, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }
+  // 🔴 Flooded segments styled in red, bold line (on flooded pane)
+  const baseStyle: L.PolylineOptions = {
+    color: '#dc2626',
+    weight: 8,
+    opacity: 0.95,
+    lineCap: 'round',
+    lineJoin: 'round',
+    pane: 'pane-flooded',
+  }
   const roadName = detail.road_name ?? 'Flooded road'
   const roadType = detail.road_type ?? '-'
   const lengthM  = Number(detail.length_m ?? 0)
@@ -373,7 +400,7 @@ async function renderFloodEvents(epoch: number) {
     if (picked.hasGeometry && picked.geometry) {
       const feature = { type: 'Feature', geometry: picked.geometry, properties: { id: picked.id, name: picked.name } }
       const geo = L.geoJSON(feature as any, {
-        style: (): L.PathOptions => ({ color: '#ef4444', weight: 3, opacity: 0.9, fillOpacity: 0.25 }),
+        style: (): L.PathOptions => ({ color: '#ef4444', weight: 3, opacity: 0.9, fillOpacity: 0.25, pane: 'pane-flooded' }),
       })
 
       geo.eachLayer((child: any) => {
@@ -414,7 +441,7 @@ async function renderFloodEvents(epoch: number) {
     if (!Number.isFinite(picked.lat!) || !Number.isFinite(picked.lon!)) continue
 
     const marker = L.circleMarker([picked.lat!, picked.lon!], {
-      radius: 6, color: '#ef4444', weight: 2, fillColor: '#fca5a5', fillOpacity: 0.9,
+      radius: 6, color: '#ef4444', weight: 2, fillColor: '#fca5a5', fillOpacity: 0.9, pane: 'pane-flooded'
     }).bindTooltip('<div class="flood-tt">Loading…</div>', {
       sticky: true, direction: 'top', opacity: 0.95, className: 'flood-tooltip'
     })
@@ -558,7 +585,7 @@ watch(() => store.activeTab, (tab) => {
   renderLayers()
 })
 
-/* ======= Other optional overlays (unchanged) ======= */
+/* ======= Other optional overlays ======= */
 let originMarker: L.Layer | null = null
 let destMarker: L.Layer | null = null
 function clear(l: L.Layer | null) { if (l && map) map.removeLayer(l) }
@@ -567,7 +594,7 @@ watch(() => store.highlightOrigin, (v) => {
   clear(originMarker)
   if (!v) return
   originMarker = L.circleMarker([v.lat, v.lon], {
-    radius: 7, weight: 3, color: '#2563eb', fillColor: '#93c5fd', fillOpacity: 0.95
+    radius: 7, weight: 3, color: '#2563eb', fillColor: '#93c5fd', fillOpacity: 0.95, pane: 'pane-routes'
   }).bindTooltip(`Origin stop${v.code ? ` (${v.code})` : ''}`, { sticky: true })
   originMarker.addTo(map)
 }, { deep: true })
@@ -576,7 +603,7 @@ watch(() => store.highlightDest, (v) => {
   clear(destMarker)
   if (!v) return
   destMarker = L.circleMarker([v.lat, v.lon], {
-    radius: 7, weight: 3, color: '#16a34a', fillColor: '#86efac', fillOpacity: 0.95
+    radius: 7, weight: 3, color: '#16a34a', fillColor: '#86efac', fillOpacity: 0.95, pane: 'pane-routes'
   }).bindTooltip(`Destination stop${v.code ? ` (${v.code})` : ''}`, { sticky: true })
   destMarker.addTo(map)
 }, { deep: true })
@@ -586,12 +613,12 @@ watch(() => store.busTripOverlay, (o) => {
   clearRouteEndpoints()
   if (!o) return
   const group = L.layerGroup()
-  const start = L.circleMarker([o.start.lat, o.start.lon], { radius: 6, color:'#2563eb', weight:2, fillOpacity:0.9 }).bindTooltip('Trip start', { sticky: true })
-  const end   = L.circleMarker([o.end.lat, o.end.lon],   { radius: 6, color:'#16a34a', weight:2, fillOpacity:0.9 }).bindTooltip('Trip end', { sticky: true })
+  const start = L.circleMarker([o.start.lat, o.start.lon], { radius: 6, color:'#2563eb', weight:2, fillOpacity:0.9, pane: 'pane-routes' }).bindTooltip('Trip start', { sticky: true })
+  const end   = L.circleMarker([o.end.lat, o.end.lon],   { radius: 6, color:'#16a34a', weight:2, fillOpacity:0.9, pane: 'pane-routes' }).bindTooltip('Trip end', { sticky: true })
   group.addLayer(start); group.addLayer(end)
   for (const seg of o.lines) {
     const poly = L.polyline([[seg.from[0], seg.from[1]], [seg.to[0], seg.to[1]]], {
-      color: '#111827', weight: 6, opacity: 0.9, dashArray: '6,6'
+      color: '#111827', weight: 6, opacity: 0.9, dashArray: '6,6', pane: 'pane-routes'
     })
     poly.bindTooltip(`Seg ${seg.meta?.id ?? ''}`, { sticky: true })
     group.addLayer(poly)
@@ -654,9 +681,9 @@ watch(() => (store as any).serviceRouteOverlay, (o) => {
     if (latlngs.length)            lastPoint  = [latlngs[latlngs.length - 1].lat, latlngs[latlngs.length - 1].lng]
 
     if (Array.isArray(d.roadPath) && d.roadPath.length >= 2) {
-      group.addLayer(L.polyline(latlngs, { color, weight: 5, opacity: 0.96 }))
+      group.addLayer(L.polyline(latlngs, { color, weight: 5, opacity: 0.96, pane: 'pane-routes' }))
     } else if (latlngs.length >= 2) {
-      group.addLayer(L.polyline(latlngs, { color, weight: 4, opacity: 0.85, dashArray: '6,6' }))
+      group.addLayer(L.polyline(latlngs, { color, weight: 4, opacity: 0.85, dashArray: '6,6', pane: 'pane-routes' }))
     }
   })
 

@@ -3,11 +3,10 @@ import { computed, ref, watch, onMounted, onActivated, onUnmounted } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { useAppStore } from '@/store/app'
 import StopDetailsPanel from '@/components/StopDetailsPanel.vue'
-import ControlsPanel from '@/components/ControlsPanel.vue'
 import MapCanvas from '@/components/MapCanvas.vue'
 import TravelTimeBarChart from '@/components/TravelTimeBarChart.vue'
 import { useUrlStateSync } from '@/components/useUrlStateSync'
-import { getBusesAffectedByFloods, getBusRouteByService } from '@/api/api'  /* ← added */
+import { getBusesAffectedByFloods, getBusRouteByService } from '@/api/api'  
 
 useUrlStateSync()
 const store = useAppStore()
@@ -37,6 +36,7 @@ function setTab(tab: 'itinerary' | 'flood') {
    ───────────────────────────── */
 function resetChart() {
   ;(store as any).serviceRouteOverlay = null
+  ;(store as any).clearColoredPolylines?.()
 }
 onMounted(resetChart)
 onActivated(resetChart)
