@@ -16,18 +16,25 @@ const store = useAppStore()
    ───────────────────────────── */
 const activeTab = ref<'itinerary' | 'flood'>('itinerary')
 
+watch(activeTab, (t) => {
+  // only if your store exposes it
+  (store as any).setActiveTab?.(t)
+}, { immediate: true })
+
 function setTab(tab: 'itinerary' | 'flood') {
   activeTab.value = tab
 
-  // map-layer visibility rules
   if (tab === 'flood') {
+    // show only floods
     store.setLayerVisible('stops', false)
     store.setLayerVisible('floodEvents', true)
   } else {
-    // itinerary tab
-    store.setLayerVisible('stops', true)
+    // itinerary: no stops layer; clear any drawn routes/overlays
+    store.setLayerVisible('stops', false)
     store.setLayerVisible('floodEvents', false)
     clearFloodUI()
+    ;(store as any).serviceRouteOverlay = null
+    ;(store as any).clearColoredPolylines?.()
   }
 }
 

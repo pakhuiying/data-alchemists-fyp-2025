@@ -2,26 +2,20 @@
 import { onMounted, watch, ref } from 'vue'
 import * as L from 'leaflet'
 import { useAppStore } from '@/store/app'
-import {
-  getAllBusStops, getBusStopByCode,
-  getAllFloodEvents, getFloodEventById,
-} from '@/api/api'
+import { getAllFloodEvents, getFloodEventById } from '@/api/api'
 
 /* ========== Emits ========== */
-const emit = defineEmits<{
-  (e: 'flood-click', payload: { floodId: number }): void
-}>()
+const emit = defineEmits<{ (e: 'flood-click', payload: { floodId: number }): void }>()
 
 const mapEl = ref<HTMLDivElement | null>(null)
 let map: L.Map
 
-/* Layers */
-let stopsLayer: L.LayerGroup | null = null
+/* Layers (no bus stops layer anymore) */
 let floodEventsLayer: L.LayerGroup | null = null
-let driveRouteLayer: L.LayerGroup | null = null
 let roadSegmentLayer: L.LayerGroup | null = null
 let busRouteLayer: L.LayerGroup | null = null
 let serviceRouteLayer: L.LayerGroup | null = null
+let driveRouteLayer: L.LayerGroup | null = null
 
 const store = useAppStore()
 
@@ -61,7 +55,7 @@ async function getFloodDetailCached(id: number) {
   return p
 }
 
-/* ================= Helpers (robust parsing + nested key search) ================= */
+/* ================= Helpers (numbers + formatting) ================= */
 function parseMaybeMinutes(val: any): number | undefined {
   if (val == null) return undefined
   if (typeof val === 'number' && Number.isFinite(val)) return val
@@ -148,13 +142,12 @@ function setColoredPolylines(pl: Array<{ path:[number,number][], color:string, f
   clearColoredPolylines()
   if (!pl?.length) return
 
-  // draw non-flooded first, flooded last (so reds go on top)
+  // draw non-flooded first, flooded last (so reds are on top)
   const ordered = [...pl].sort((a, b) => Number(a.flooded) - Number(b.flooded))
 
   const all: L.LatLngExpression[] = []
   for (const seg of ordered) {
     const latlngs = seg.path.map(([lat, lon]) => [lat, lon] as [number, number])
-
     const poly = L.polyline(latlngs, {
       color: seg.color,
       weight: seg.flooded ? 8 : 6,
@@ -163,9 +156,7 @@ function setColoredPolylines(pl: Array<{ path:[number,number][], color:string, f
       lineJoin: 'round',
       pane: seg.flooded ? 'pane-flooded' : 'pane-routes',
     }).addTo(coloredPolylinesGroup!)
-
-    if (seg.flooded) (poly as any).bringToFront?.() // belt & suspenders
-
+    if (seg.flooded) (poly as any).bringToFront?.()
     all.push(...latlngs)
   }
   const b = all.length ? L.latLngBounds(all as any) : null
@@ -173,23 +164,6 @@ function setColoredPolylines(pl: Array<{ path:[number,number][], color:string, f
 }
 ;(store as any).setColoredPolylines = setColoredPolylines
 ;(store as any).clearColoredPolylines = clearColoredPolylines
-
-/* Stops styles + selection (kept) */
-const STOP_STYLE_DEFAULT: L.CircleMarkerOptions = {
-  radius: 3, color: '#0ea5e9', weight: 2, fillColor: '#38bdf8', fillOpacity: 0.9,
-}
-const STOP_STYLE_ACTIVE: L.CircleMarkerOptions = {
-  radius: 4, color: '#ef4444', weight: 3, fillColor: '#fca5a5', fillOpacity: 0.95,
-}
-let lastSelectedStopMarker: L.CircleMarker | null = null
-function activateStopMarker(m: L.CircleMarker) {
-  if (lastSelectedStopMarker && lastSelectedStopMarker !== m) {
-    lastSelectedStopMarker.setStyle(STOP_STYLE_DEFAULT)
-  }
-  m.setStyle(STOP_STYLE_ACTIVE)
-  m.bringToFront()
-  lastSelectedStopMarker = m
-}
 
 /* Map init */
 function ensureMap() {
@@ -224,27 +198,21 @@ function ensureMap() {
 }
 
 /* Clearers */
-function clearStopsOverlays() {
-  if (stopsLayer) { map.removeLayer(stopsLayer); stopsLayer = null }
-  if (lastSelectedStopMarker) lastSelectedStopMarker = null
-  map?.closePopup?.()
-}
 function clearFloodOverlays() {
   if (floodEventsLayer) { map.removeLayer(floodEventsLayer); floodEventsLayer = null }
   if (roadSegmentLayer) { map.removeLayer(roadSegmentLayer); roadSegmentLayer = null }
   map?.closePopup?.()
-  ++detailEpoch
 }
 function clearAllRouteOverlays() {
   if (busRouteLayer) { map.removeLayer(busRouteLayer); busRouteLayer = null }
   if (serviceRouteLayer) { map.removeLayer(serviceRouteLayer); serviceRouteLayer = null }
   if (driveRouteLayer) { map.removeLayer(driveRouteLayer); driveRouteLayer = null }
-  clearColoredPolylines()
+  ;(store as any).clearColoredPolylines?.()
   if (roadSegmentLayer) { map.removeLayer(roadSegmentLayer); roadSegmentLayer = null }
   clearRouteEndpoints()
 }
 
-/* WKT → latlngs (used elsewhere) */
+/* WKT → latlngs */
 function wktToLatLngs(wkt: string): [number, number][][] {
   const s = (wkt || '').trim()
   if (!s) return []
@@ -278,11 +246,9 @@ function renderRoadSegmentFromDetail(detail: any): L.LatLngBounds | null {
   const lineGroups = wktToLatLngs(detail.geometry)
   if (!lineGroups.length) return null
 
-  // clear previous
   if (roadSegmentLayer) { map.removeLayer(roadSegmentLayer); roadSegmentLayer = null }
 
   const group = L.layerGroup()
-  // 🔴 Flooded segments styled in red, bold line (on flooded pane)
   const baseStyle: L.PolylineOptions = {
     color: '#dc2626',
     weight: 8,
@@ -323,20 +289,10 @@ async function drawFloodSegmentById(floodId: number) {
     if (myEpoch !== clickEpoch) return
     const bounds = renderRoadSegmentFromDetail(detail)
     if (bounds && bounds.isValid()) map.fitBounds(bounds.pad(0.12))
-  } catch {
-    // swallow; tooltip already shows failure if hover triggered
-  }
+  } catch {}
 }
 
-/* Pickers */
-function pickStopFields(s: any) {
-  const lat = s.lat ?? s.latitude ?? s.stop_lat
-  const lon = s.lon ?? s.lng ?? s.longitude ?? s.stop_lon
-  const name = s.name ?? s.stop_name ?? s.description ?? s.stop_desc ?? ''
-  const code = s.stop_code ?? s.code ?? s.id ?? s.stop_id ?? ''
-  const id = s.id ?? s.stop_id ?? code
-  return { lat: Number(lat), lon: Number(lon), name: String(name), code: String(code), id }
-}
+/* Flood event field picker */
 function pickFloodFields(e: any) {
   const id = e.flood_id ?? e.id ?? e.flood_event_id ?? e.event_id ?? e.pk ?? null
   const name = e.flooded_location ?? e.name ?? e.title ?? `Flood ${id ?? ''}`
@@ -350,42 +306,10 @@ function pickFloodFields(e: any) {
 
 /* ===================================================================== */
 let renderEpoch = 0
-let detailEpoch = 0
-
-/* Async renders with epoch */
-async function renderStops(epoch: number) {
-  clearStopsOverlays()
-  if (!store.layers.stops) return
-  const stops = await getAllBusStops()
-  if (epoch !== renderEpoch) return
-  const group = L.layerGroup()
-  for (const raw of stops as any[]) {
-    const { lat, lon, name, code } = pickStopFields(raw)
-    if (!isFinite(lat) || !isFinite(lon)) continue
-    const marker = L.circleMarker([lat, lon], STOP_STYLE_DEFAULT)
-    marker.bindTooltip(`<strong>${name || 'Stop'}</strong><br/>Code: ${code || '-'}`, { sticky: true })
-    marker.on('click', async () => {
-      activateStopMarker(marker)
-      try {
-        store.setSelectedStopLoading(true)
-        store.selectStop(code || null)
-        const detail = await getBusStopByCode(String(code))
-        if (epoch !== renderEpoch) return
-        store.setSelectedStop(detail)
-        store.setActiveTab('stops')
-      } finally {
-        store.setSelectedStopLoading(false)
-      }
-    })
-    group.addLayer(marker)
-  }
-  if (epoch !== renderEpoch) return
-  stopsLayer = group.addTo(map)
-}
 
 async function renderFloodEvents(epoch: number) {
-  clearFloodOverlays()
-  if (!store.layers.floodEvents) return
+  // clear current
+  if (floodEventsLayer) { map.removeLayer(floodEventsLayer); floodEventsLayer = null }
 
   const events = await getAllFloodEvents()
   if (epoch !== renderEpoch) return
@@ -407,25 +331,22 @@ async function renderFloodEvents(epoch: number) {
         child.bindTooltip('<div class="flood-tt">Loading…</div>', {
           sticky: true, direction: 'top', opacity: 0.95, className: 'flood-tooltip'
         })
-
         child.on('mouseover', async (e: L.LeafletMouseEvent) => {
-          const myEpoch = ++floodHoverEpoch
+          const myHover = ++floodHoverEpoch
           openExclusiveTooltip(child, '<div class="flood-tt">Loading…</div>', e.latlng)
           try {
             const detail = await getFloodDetailCached(Number(picked.id))
-            if (myEpoch !== floodHoverEpoch || epoch !== renderEpoch) return
+            if (myHover !== floodHoverEpoch || epoch !== renderEpoch) return
             const html = buildFloodTooltip(detail, { id: picked.id, name: picked.name })
             openExclusiveTooltip(child, html, e.latlng)
           } catch {
-            if (myEpoch !== floodHoverEpoch) return
+            if (myHover !== floodHoverEpoch) return
             openExclusiveTooltip(child, '<div class="flood-tt">Failed to load details</div>', e.latlng)
           }
         })
-
         child.on('mouseout', () => closeTooltipOwner(child))
       })
 
-      // ✅ Emit flood id on click AND draw flooded roads
       geo.on('click', async () => {
         if (picked.id) {
           emit('flood-click', { floodId: Number(picked.id) })
@@ -439,7 +360,6 @@ async function renderFloodEvents(epoch: number) {
 
     // Point fallback
     if (!Number.isFinite(picked.lat!) || !Number.isFinite(picked.lon!)) continue
-
     const marker = L.circleMarker([picked.lat!, picked.lon!], {
       radius: 6, color: '#ef4444', weight: 2, fillColor: '#fca5a5', fillOpacity: 0.9, pane: 'pane-flooded'
     }).bindTooltip('<div class="flood-tt">Loading…</div>', {
@@ -447,21 +367,19 @@ async function renderFloodEvents(epoch: number) {
     })
 
     marker.on('mouseover', async () => {
-      const myEpoch = ++floodHoverEpoch
+      const myHover = ++floodHoverEpoch
       openExclusiveTooltip(marker, '<div class="flood-tt">Loading…</div>')
       try {
         const detail = await getFloodDetailCached(Number(picked.id))
-        if (myEpoch !== floodHoverEpoch || epoch !== renderEpoch) return
-        const html = buildFloodTooltip(detail, { id: picked.id, name: picked.name })
-        openExclusiveTooltip(marker, html)
+        if (myHover !== floodHoverEpoch || epoch !== renderEpoch) return
+        openExclusiveTooltip(marker, buildFloodTooltip(detail, { id: picked.id, name: picked.name }))
       } catch {
-        if (myEpoch !== floodHoverEpoch) return
+        if (myHover !== floodHoverEpoch) return
         openExclusiveTooltip(marker, '<div class="flood-tt">Failed to load details</div>')
       }
     })
     marker.on('mouseout', () => closeTooltipOwner(marker))
 
-    // ✅ Emit flood id on click AND draw flooded roads
     marker.on('click', async () => {
       if (picked.id) {
         emit('flood-click', { floodId: Number(picked.id) })
@@ -476,7 +394,7 @@ async function renderFloodEvents(epoch: number) {
   floodEventsLayer = group.addTo(map)
 }
 
-/* -------------------- Route endpoints (kept) -------------------- */
+/* -------------------- Route endpoints -------------------- */
 let routeStartMarker: L.Marker | null = null
 let routeEndMarker: L.Marker | null = null
 function createEndpointIcon(label: 'START' | 'END', variant: 'start' | 'end') {
@@ -515,77 +433,36 @@ function setRouteEndpoints(start: {lat:number, lon:number} | null, end: {lat:num
 async function renderLayers() {
   ensureMap()
   const epoch = ++renderEpoch
-  ++detailEpoch
 
-  if (store.layers.floodEvents) {
-    // when flood layer on, clear other route overlays + chart
+  if (store.activeTab === 'flood') {
+    // entering Flood view: clear other overlays + chart, then render floods
     clearAllRouteOverlays()
     ;(store as any).serviceRouteOverlay = null
     ;(store as any).showTravelTimeChart = false
+    await renderFloodEvents(epoch)
+  } else {
+    // other tabs: remove flood polygons/segments
+    clearFloodOverlays()
   }
-
-  if (store.layers.stops) await renderStops(epoch); else clearStopsOverlays()
-  if (store.layers.floodEvents) await renderFloodEvents(epoch); else clearFloodOverlays()
 }
-
-/* Small UI control to toggle stops layer */
-let uiCheckboxStops: HTMLInputElement | null = null
-function addLayerToggleControl() {
-  const C = L.Control.extend({
-    onAdd: () => {
-      const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control')
-      div.style.background = '#fff'
-      div.style.padding = '8px 10px'
-      div.style.boxShadow = '0 1px 4px rgba(0,0,0,.2)'
-      div.style.font = '12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial'
-
-      const label = document.createElement('label')
-      label.style.display = 'flex'
-      label.style.alignItems = 'center'
-      label.style.gap = '6px'
-      label.style.cursor = 'pointer'
-
-      const cb = document.createElement('input')
-      cb.type = 'checkbox'
-      cb.checked = !!store.layers.stops
-      uiCheckboxStops = cb
-
-      const span = document.createElement('span')
-      span.textContent = 'Bus stops'
-
-      label.appendChild(cb)
-      label.appendChild(span)
-      div.appendChild(label)
-
-      L.DomEvent.disableClickPropagation(div)
-
-      cb.addEventListener('change', () => {
-        const on = cb.checked
-        store.layers.stops = on
-        if (on) store.layers.floodEvents = false
-      })
-      return div
-    }
-  })
-  new C({ position: 'topleft' }).addTo(map)
-}
-watch(() => store.layers.stops, (v) => {
-  if (uiCheckboxStops && uiCheckboxStops.checked !== v) uiCheckboxStops.checked = v
-})
 
 /* ========================= Reactivity glue ========================= */
 onMounted(async () => {
   renderLayers()
-  addLayerToggleControl()
 })
-watch(() => ({ ...store.layers }), () => renderLayers(), { deep: true })
-watch(() => store.activeTab, (tab) => {
-  if (tab === 'stops') { store.layers.stops = true;  store.layers.floodEvents = false }
-  else if (tab === 'flood') { store.layers.floodEvents = true; store.layers.stops = false }
+
+type UITab = 'itinerary' | 'flood'
+
+watch(() => (store as any).activeTab as UITab | undefined, (tab) => {
+  if (tab === 'itinerary') {
+    (store as any).serviceRouteOverlay = null
+    clearAllRouteOverlays()
+    clearFloodOverlays()
+  }
   renderLayers()
 })
 
-/* ======= Other optional overlays ======= */
+/* ======= Optional overlays still supported (origin/dest, trips, etc.) ======= */
 let originMarker: L.Layer | null = null
 let destMarker: L.Layer | null = null
 function clear(l: L.Layer | null) { if (l && map) map.removeLayer(l) }
@@ -640,45 +517,32 @@ watch(() => (store as any)._fitBoundsCoords, (coords) => {
 watch(() => (store as any).serviceRouteOverlay, (o) => {
   if (serviceRouteLayer) { map.removeLayer(serviceRouteLayer); serviceRouteLayer = null }
   clearRouteEndpoints()
-
   if (!o) { clearColoredPolylines(); return }
 
-  // ---------- Case 1: pre-colored polylines (tuples already) ----------
+  // Case 1: pre-colored polylines
   if (Array.isArray(o?.polylines) && o.polylines.length) {
     setColoredPolylines(o.polylines)
-
     const first = o.polylines[0]?.path?.[0] as [number, number] | undefined
     const lastSeg = o.polylines[o.polylines.length - 1]
     const last = lastSeg?.path?.[lastSeg.path.length - 1] as [number, number] | undefined
-
     if (first && last) {
-      setRouteEndpoints(
-        { lat: first[0], lon: first[1] },
-        { lat: last[0],  lon: last[1]  },
-      )
+      setRouteEndpoints({ lat: first[0], lon: first[1] }, { lat: last[0],  lon: last[1] })
     }
     return
   }
 
-  // ---------- Case 2: build from directions ----------
+  // Case 2: build from directions
   const group = L.layerGroup()
   const colors = ['#0ea5e9', '#10b981', '#f59e0b', '#ef4444']
 
-  // store endpoints as tuples to avoid L.LatLng narrowing issues
   let firstPoint: [number, number] | null = null
   let lastPoint: [number, number] | null = null
 
   o.directions.forEach((d: any, idx: number) => {
     const color = colors[idx % colors.length]
-
-    // Leaflet polylines want LatLngs, so we still create them for rendering…
-    const latlngs = (d.roadPath ?? d.points).map(
-      (p: [number, number]) => L.latLng(p[0], p[1])
-    )
-
-    // …but we capture endpoints as raw tuples [lat, lon]
+    const latlngs = (d.roadPath ?? d.points).map((p: [number, number]) => L.latLng(p[0], p[1]))
     if (!firstPoint && latlngs.length) firstPoint = [latlngs[0].lat, latlngs[0].lng]
-    if (latlngs.length)            lastPoint  = [latlngs[latlngs.length - 1].lat, latlngs[latlngs.length - 1].lng]
+    if (latlngs.length) lastPoint = [latlngs[latlngs.length - 1].lat, latlngs[latlngs.length - 1].lng]
 
     if (Array.isArray(d.roadPath) && d.roadPath.length >= 2) {
       group.addLayer(L.polyline(latlngs, { color, weight: 5, opacity: 0.96, pane: 'pane-routes' }))
@@ -690,10 +554,7 @@ watch(() => (store as any).serviceRouteOverlay, (o) => {
   serviceRouteLayer = group.addTo(map)
 
   if (firstPoint && lastPoint) {
-    setRouteEndpoints(
-      { lat: firstPoint[0], lon: firstPoint[1] },
-      { lat: lastPoint[0],  lon: lastPoint[1]  },
-    )
+    setRouteEndpoints({ lat: firstPoint[0], lon: firstPoint[1] }, { lat: lastPoint[0],  lon: lastPoint[1] })
   }
 }, { deep: true })
 </script>
