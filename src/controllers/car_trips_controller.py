@@ -30,7 +30,6 @@ flood_events_df['geom_parsed'] = flood_events_df['geom'].apply(
 
 flood_buffers = gpd.GeoSeries(flood_events_df['geom_parsed']).buffer(0.00090)
 
-
 # def get_all_car_trips_flooded():
 #     response = supabase.table('car_trips_flooded').select('*').execute()
 #     if not response.data:  
