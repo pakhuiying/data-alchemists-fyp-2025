@@ -4,17 +4,29 @@ import * as L from 'leaflet'
 import proj4 from 'proj4'
 import {
   getAllFloodEvents,
-  getFloodEventById,
   getFloodLocations,
   getFloodEventsByDateRange,
   getCriticalSegmentsNearFlood,
-  type CriticalSegmentsNearFloodResponse,
+  getFloodEventById,
   getUniqueFloodEventsByLocation,
+  type CriticalSegmentsNearFloodResponse,
+  getTopCriticalSegments,
+  getRoadCriticality,
 } from '@/api/api'
 
-type Tab = 'locations' | 'critical'
-const activeTab = ref<Tab>('locations')
+/* ─────────────────────────────────────────────────────────────
+   HIGH-LEVEL TABS
+   ───────────────────────────────────────────────────────────── */
+type MainTab = 'locations' | 'critical'
+const activeTab = ref<MainTab>('locations')
 
+/* critical tab sub-modes */
+type CriticalMode = 'flood' | 'road'
+const activeCriticalMode = ref<CriticalMode>('flood') // Flood Mode default
+
+/* ─────────────────────────────────────────────────────────────
+   PROJECTIONS (SVY21 → WGS84) for critical segments
+   ───────────────────────────────────────────────────────────── */
 proj4.defs(
   'EPSG:3414',
   '+proj=tmerc +lat_0=1.36666666666667 +lon_0=103.833333333333 +k=1 +x_0=28001.642 +y_0=38744.572 +ellps=WGS84 +units=m +no_defs'
@@ -24,29 +36,50 @@ const toWGS84 = (x: number, y: number): [number, number] => {
   return [lat, lon]
 }
 
-/* ── data types ── */
+/* ─────────────────────────────────────────────────────────────
+   TYPES
+   ───────────────────────────────────────────────────────────── */
 type FloodRow = { location: string; count: number; time_travel_delay_min?: number }
 
-/* ── map refs ── */
+type GeoFeature = {
+  type: 'Feature'
+  geometry: { type: 'LineString'; coordinates: [number, number][] }
+  properties: Record<string, any>
+}
+
+/* ─────────────────────────────────────────────────────────────
+   MAP REFS / LAYERS
+   ───────────────────────────────────────────────────────────── */
 const mapEl = ref<HTMLDivElement | null>(null)
 let map: L.Map
-let markersLayer: L.LayerGroup | null = null
-let segmentLayer: L.LayerGroup | null = null
-let criticalLayer: L.LayerGroup | null = null
-let highlighted: L.Polyline | null = null
+let markersLayer: L.LayerGroup | null = null        // flood markers (locations / critical list)
+let segmentLayer: L.LayerGroup | null = null        // flooded road segments (locations tab)
+let criticalLayer: L.LayerGroup | null = null       // critical segments near flood (Flood Mode)
+let roadCriticalLayer: L.LayerGroup | null = null   // global road criticality (Road Mode)
+let highlighted: L.Polyline | null = null           // highlight for any mode
 let drawEpoch = 0
 
-/* ── data stores ── */
-const eventsMaster    = ref<any[]>([])   // all events ever
-const eventsLocations = ref<any[]>([])   // events in current date filter (locations tab)
+// 🔘 Single toggle for showing/hiding all flood markers
+const showFloodMarkers = ref(true)
 
-const locationsMasterAgg = ref<FloodRow[]>([]) // full agg from API
-const floodLocations     = ref<FloodRow[]>([]) // visible agg (after date filter)
+/* legend for road betweenness */
+let roadLegend: L.Control | null = null
+
+/* ─────────────────────────────────────────────────────────────
+   DATA STORES
+   ───────────────────────────────────────────────────────────── */
+const eventsMaster    = ref<any[]>([])  // all events
+const eventsLocations = ref<any[]>([])  // events for locations tab (respecting date filter)
+
+const locationsMasterAgg = ref<FloodRow[]>([])
+const floodLocations     = ref<FloodRow[]>([])
 
 const loadingLocations = ref(true)
 const loadingEvents    = ref(true)
 
-/* ── date filter (locations tab) ── */
+/* ─────────────────────────────────────────────────────────────
+   DATE FILTER (LOCATIONS TAB)
+   ───────────────────────────────────────────────────────────── */
 const startDate = ref<string>('') // YYYY-MM-DD
 const endDate   = ref<string>('')
 const filteringByDate = ref(false)
@@ -84,14 +117,17 @@ async function applyDateFilter() {
   filteringByDate.value = true
   try {
     const rangeEvents = await getFloodEventsByDateRange({
-      start_date: startDate.value, end_date: endDate.value
+      start_date: startDate.value,
+      end_date: endDate.value,
     }) as any[]
     eventsLocations.value = Array.isArray(rangeEvents) ? rangeEvents : []
     floodLocations.value  = buildLocationCounts(eventsLocations.value)
     if (activeTab.value === 'locations') rerenderMarkersForActiveTab()
-    clearSegments(); clearCritical()
+    clearSegments()
+    clearCritical()
   } catch (e) {
-    console.error(e); alert('Failed to fetch events for date range.')
+    console.error(e)
+    alert('Failed to fetch events for date range.')
   } finally {
     loadingLocations.value = false
   }
@@ -106,13 +142,16 @@ async function clearDateFilter() {
     eventsLocations.value = eventsMaster.value.slice()
     floodLocations.value  = locationsMasterAgg.value.slice()
     if (activeTab.value === 'locations') rerenderMarkersForActiveTab()
-    clearSegments(); clearCritical()
+    clearSegments()
+    clearCritical()
   } finally {
     loadingLocations.value = false
   }
 }
 
-/* ── locations tab filters ── */
+/* ─────────────────────────────────────────────────────────────
+   LOCATIONS TAB FILTERS
+   ───────────────────────────────────────────────────────────── */
 const q = ref('')
 const minCount = ref(1)
 const sortBy = ref<'count' | 'name' | 'delay'>('count')
@@ -122,6 +161,7 @@ const topN = ref(10)
 const filteredLocations = computed(() => {
   const query = q.value.trim().toLowerCase()
   let rows = floodLocations.value
+
   if (query) {
     rows = rows.filter(r => (r.location || '').toLowerCase().includes(query))
   }
@@ -150,21 +190,23 @@ const filteredLocations = computed(() => {
 })
 
 function resetFilters() {
-  q.value=''
-  minCount.value=1
-  sortBy.value='count'
-  sortDir.value='desc'
-  topN.value=20
+  q.value = ''
+  minCount.value = 1
+  sortBy.value = 'count'
+  sortDir.value = 'desc'
+  topN.value = 20
 }
 
-/* ── critical tab state ── */
+/* ─────────────────────────────────────────────────────────────
+   CRITICAL TAB (FLOOD MODE) STATE
+   ───────────────────────────────────────────────────────────── */
 const bufferM  = ref<number>(50)
 const errorMsg = ref<string | null>(null)
 const infoMsg  = ref<string | null>(null)
 const selectedFloodId = ref<number | null>(null)
 const lastPayload = ref<CriticalSegmentsNearFloodResponse | null>(null)
 
-/* list of unique flood events (critical tab) */
+/* list of unique flood events (for Critical tab event table) */
 const uniqueEvents = ref<Array<{
   flood_id: number
   flooded_location: string
@@ -173,12 +215,12 @@ const uniqueEvents = ref<Array<{
   time_travel_delay_min?: number
 }>>([])
 
-const qEvents    = ref('')
-const topEvents  = ref(500)
-const sortByCrit = ref<'delay' | 'name' | 'id'>('delay')
+const qEvents     = ref('')
+const topEvents   = ref(500)
+const sortByCrit  = ref<'delay' | 'name' | 'id'>('delay')
 const sortDirCrit = ref<'desc' | 'asc'>('desc')
 
-const filteredEvents = computed(() => {
+const filteredEventsCritical = computed(() => {
   let rows = uniqueEvents.value
   const qv = qEvents.value.trim().toLowerCase()
 
@@ -209,9 +251,12 @@ const filteredEvents = computed(() => {
   return rows.slice(0, Math.max(1, Number(topEvents.value) || 0))
 })
 
-/* ── tooltip cache ── */
+/* ─────────────────────────────────────────────────────────────
+   TOOLTIP CACHE
+   ───────────────────────────────────────────────────────────── */
 const detailCache = new Map<number, any>()
 const detailPromise = new Map<number, Promise<any>>()
+
 async function getDetailCached(id: number) {
   if (detailCache.has(id)) return detailCache.get(id)
   if (detailPromise.has(id)) return detailPromise.get(id)!
@@ -221,22 +266,22 @@ async function getDetailCached(id: number) {
     detailCache.set(id, detail)
     detailPromise.delete(id)
     return detail
-  })()
-    .catch(e => { detailPromise.delete(id); throw e })
+  })().catch(e => { detailPromise.delete(id); throw e })
   detailPromise.set(id, p)
   return p
 }
 
 const fmt = {
   min: (n: any) => Number.isFinite(+n) ? `${(+n).toFixed(2)} min` : '—',
-  km:  (m: any) => Number.isFinite(+m) ? `${(+m/1000).toFixed(3)} km` : '—',
+  km:  (m: any) => Number.isFinite(+m) ? `${(+m / 1000).toFixed(3)} km` : '—',
   date: (s: any) => {
     if (!s) return '—'
     try { return new Date(s).toLocaleString() }
     catch { return String(s) }
-  }
+  },
 }
-function buildFloodTooltip(detail: any, fallback: { id?: any, name?: string } = {}) {
+
+function buildFloodTooltip(detail: any, fallback: { id?: any; name?: string } = {}) {
   const id = detail?.id ?? detail?.flood_id ?? fallback?.id ?? '—'
   const loc = detail?.flooded_location ?? detail?.name ?? fallback?.name ?? 'Flood event'
   const startedAt = detail?.started_at ?? detail?.start_time ?? detail?.timestamp
@@ -276,7 +321,9 @@ function buildFloodTooltip(detail: any, fallback: { id?: any, name?: string } = 
     </div>`
 }
 
-/* ── geometry helpers ── */
+/* ─────────────────────────────────────────────────────────────
+   WKT HELPER (for flooded segments in locations tab)
+   ───────────────────────────────────────────────────────────── */
 function wktToLatLngs(wkt: string): [number, number][][] {
   const s = (wkt || '').trim()
   if (!s) return []
@@ -288,7 +335,7 @@ function wktToLatLngs(wkt: string): [number, number][][] {
     const latlngs: [number, number][] = []
     for (const pair of pairs) {
       const [xStr, yStr] = pair.split(/\s+/).filter(Boolean)
-      const lon = Number(xStr), lat = Number(yStr)
+      const lon = Number(xStr); const lat = Number(yStr)
       if (isFinite(lat) && isFinite(lon)) latlngs.push([lat, lon])
     }
     return latlngs
@@ -310,15 +357,9 @@ function wktToLatLngs(wkt: string): [number, number][][] {
   }
 }
 
-function clearSegments() {
-  if (segmentLayer) { map.removeLayer(segmentLayer); segmentLayer = null }
-}
-function clearCritical() {
-  if (criticalLayer) { map.removeLayer(criticalLayer); criticalLayer = null }
-  if (highlighted) { map.removeLayer(highlighted); highlighted = null }
-}
-
-/* ── map setup ── */
+/* ─────────────────────────────────────────────────────────────
+   MAP SETUP + UTILS
+   ───────────────────────────────────────────────────────────── */
 function ensureMap() {
   if (map) return
   const token = import.meta.env.VITE_MAPBOX_TOKEN
@@ -359,6 +400,22 @@ function makeFloodIcon(selected: boolean) {
 
 const groupByLocation = new Map<string, L.LayerGroup>()
 
+function clearSegments() {
+  if (segmentLayer) { map.removeLayer(segmentLayer); segmentLayer = null }
+}
+function clearCritical() {
+  if (criticalLayer) { map.removeLayer(criticalLayer); criticalLayer = null }
+  clearHighlight()
+}
+function clearRoadCritical() {
+  if (roadCriticalLayer) { map.removeLayer(roadCriticalLayer); roadCriticalLayer = null }
+  removeRoadLegend()
+  clearHighlight()
+}
+function clearHighlight() {
+  if (highlighted) { map.removeLayer(highlighted); highlighted = null }
+}
+
 function baseMarkerForEvent(e: any, isSelected: boolean) {
   const name: string = e.flooded_location || e.name || ''
   const lat = e.latitude ?? e.lat ?? e.center_lat
@@ -369,12 +426,12 @@ function baseMarkerForEvent(e: any, isSelected: boolean) {
   const marker = L.marker([+lat, +lon], { icon: makeFloodIcon(isSelected) })
     .bindTooltip(
       `<div class="flood-tt"><div class="tt-title">${name || 'Flood event'}</div><div class="tt-subtle">ID: ${id || '—'}</div></div>`,
-      { sticky: true, direction: 'top', opacity: 0.95, className: 'flood-tooltip' }
+      { sticky: true, direction: 'top', opacity: 0.95, className: 'flood-tooltip' },
     )
     .on('mouseover', async (ev: L.LeafletMouseEvent) => {
       if (!Number.isFinite(id)) return
       const tt = (marker as any).getTooltip?.()
-      tt?.setContent(`<div class="flood-tt">Loading…</div>`)
+      tt?.setContent('<div class="flood-tt">Loading…</div>')
       ;(marker as any).openTooltip?.(ev.latlng)
 
       try {
@@ -382,19 +439,31 @@ function baseMarkerForEvent(e: any, isSelected: boolean) {
         tt?.setContent(buildFloodTooltip(detail, { id, name }))
         ;(marker as any).openTooltip?.(ev.latlng)
       } catch {
-        tt?.setContent(`<div class="flood-tt">Failed to load details</div>`)
+        tt?.setContent('<div class="flood-tt">Failed to load details</div>')
       }
     })
     .on('click', () => {
       onSelectFloodRow(e)
       activeTab.value = 'critical'
+      activeCriticalMode.value = 'flood'
     })
 
-  return { marker, lat, lon, name, id }
+  return { marker, lat, lon, id, name }
 }
 
+/* re-render markers depending on main tab + filters */
 function rerenderMarkersForActiveTab() {
   if (!map) return
+
+  // respect the single toggle
+  if (!showFloodMarkers.value) {
+    if (markersLayer) {
+      map.removeLayer(markersLayer)
+      markersLayer = null
+    }
+    return
+  }
+
   if (markersLayer) { map.removeLayer(markersLayer); markersLayer = null }
   markersLayer = L.layerGroup().addTo(map)
   const bounds = L.latLngBounds([])
@@ -407,9 +476,7 @@ function rerenderMarkersForActiveTab() {
     for (const e of data) {
       const name: string = e.flooded_location || e.name || e.location || e.site || e.place || ''
       if (!name || !nameSet.has(name)) continue
-      const id = Number(e.flood_id ?? e.id ?? e.flood_event_id ?? e.event_id)
-      const isSelected = selectedFloodId.value === id
-      const built = baseMarkerForEvent(e, isSelected)
+      const built = baseMarkerForEvent(e, false)
       if (!built) continue
       const { marker, lat, lon } = built
       markersLayer.addLayer(marker)
@@ -422,8 +489,8 @@ function rerenderMarkersForActiveTab() {
     return
   }
 
-  // critical tab uses filteredEvents list
-  for (const r of filteredEvents.value) {
+  // Critical tab (for the Flood Mode event list)
+  for (const r of filteredEventsCritical.value) {
     const lat = r.latitude
     const lon = r.longitude
     if (!Number.isFinite(+lat!) || !Number.isFinite(+lon!)) continue
@@ -431,20 +498,25 @@ function rerenderMarkersForActiveTab() {
     const marker = L.marker([+lat!, +lon!], { icon: makeFloodIcon(isSelected) })
       .bindTooltip(
         `<div class="flood-tt"><div class="tt-title">${r.flooded_location || 'Flood event'}</div><div class="tt-subtle">ID: ${r.flood_id}</div></div>`,
-        { sticky: true, direction: 'top', opacity: 0.95, className: 'flood-tooltip' }
+        { sticky: true, direction: 'top', opacity: 0.95, className: 'flood-tooltip' },
       )
       .on('click', () => { onSelectFloodId(r.flood_id) })
     markersLayer.addLayer(marker)
     bounds.extend([+lat!, +lon!])
   }
+
   if (bounds.isValid()) map.fitBounds(bounds.pad(0.12))
 }
 
-/* ── draw flooded segments for a chosen location row ── */
+/* ─────────────────────────────────────────────────────────────
+   LOCATIONS TAB: DRAW FLOODED SEGMENTS
+   ───────────────────────────────────────────────────────────── */
 async function focusLocation(name: string) {
   if (!map) return
   const myEpoch = ++drawEpoch
-  clearSegments(); clearCritical()
+  clearSegments()
+  clearCritical()
+  clearRoadCritical()
   segmentLayer = L.layerGroup().addTo(map)
 
   const pool = filteringByDate.value ? eventsLocations.value : eventsMaster.value
@@ -452,7 +524,7 @@ async function focusLocation(name: string) {
 
   const evts = pool.filter(e =>
     [e.flooded_location, e.name, e.location, e.site, e.place]
-      .some(v => String(v ?? '').trim().toLowerCase() === key)
+      .some(v => String(v ?? '').trim().toLowerCase() === key),
   )
 
   if (!evts.length) return
@@ -471,7 +543,9 @@ async function focusLocation(name: string) {
       const detail = id != null ? await getDetailCached(Number(id)) : e
       if (myEpoch !== drawEpoch) return
       drawDetailGeometry(detail, style, bounds)
-    } catch {/* ignore */}
+    } catch {
+      /* ignore */
+    }
   }
 
   if (bounds.isValid()) {
@@ -506,11 +580,14 @@ function drawDetailGeometry(detail: any, style: L.PathOptions, boundsAcc: L.LatL
   }
 }
 
-/* ── critical segment logic ── */
+/* ─────────────────────────────────────────────────────────────
+   CRITICAL TAB: FLOOD MODE (NEAR-FLOOD CRITICAL SEGMENTS)
+   ───────────────────────────────────────────────────────────── */
 function onSelectFloodRow(e: any) {
   const id = Number(e?.flood_id ?? e?.id ?? e?.flood_event_id ?? e?.event_id)
   onSelectFloodId(id)
 }
+
 function onSelectFloodId(fid: number) {
   if (!Number.isFinite(fid) || fid <= 0) {
     errorMsg.value = 'Invalid flood id.'
@@ -520,12 +597,14 @@ function onSelectFloodId(fid: number) {
   lastPayload.value = null
   infoMsg.value = null
   activeTab.value = 'critical'
+  activeCriticalMode.value = 'flood'
   rerenderMarkersForActiveTab()
   fetchAndDrawCritical(fid)
 }
 
 async function fetchAndDrawCritical(fid: number) {
   clearCritical()
+  clearRoadCritical()
   errorMsg.value = null
   infoMsg.value = null
   if (!Number.isFinite(fid) || fid <= 0) {
@@ -556,12 +635,13 @@ async function fetchAndDrawCritical(fid: number) {
 
 function drawOnlyFloodPoint(fid: number) {
   clearCritical()
+  clearRoadCritical()
   criticalLayer = L.layerGroup().addTo(map)
   const evtU = uniqueEvents.value.find(e => Number(e.flood_id) === Number(fid))
   const latU = evtU?.latitude
   const lonU = evtU?.longitude
   const evt = eventsMaster.value.find(e =>
-    Number(e.flood_id ?? e.id ?? e.flood_event_id ?? e.event_id) === Number(fid)
+    Number(e.flood_id ?? e.id ?? e.flood_event_id ?? e.event_id) === Number(fid),
   )
   const lat = Number.isFinite(+latU!) ? latU : (evt?.latitude ?? evt?.lat ?? evt?.center_lat)
   const lon = Number.isFinite(+lonU!) ? lonU : (evt?.longitude ?? evt?.lon ?? evt?.center_lon ?? evt?.lng)
@@ -581,6 +661,7 @@ function drawOnlyFloodPoint(fid: number) {
 
 function drawCritical(p: CriticalSegmentsNearFloodResponse) {
   clearCritical()
+  clearRoadCritical()
   criticalLayer = L.layerGroup().addTo(map)
   const bounds = L.latLngBounds([])
 
@@ -618,9 +699,8 @@ function drawCritical(p: CriticalSegmentsNearFloodResponse) {
       weight: 6,
       opacity: 0.95,
       dashArray: '4,6',
-    })
-      .bindTooltip(
-        `
+    }).bindTooltip(
+      `
         <div class="flood-tt">
           <div class="tt-title">${safeName}</div>
           <div class="tt-subtle">${seg.road_type || '—'}</div>
@@ -630,8 +710,8 @@ function drawCritical(p: CriticalSegmentsNearFloodResponse) {
             <tr><th>Buffer</th><td>${(p as any).buffer_m} m</td></tr>
           </table>
         </div>`,
-        { sticky: true, direction: 'top', opacity: 0.95, className: 'flood-tooltip' }
-      )
+      { sticky: true, direction: 'top', opacity: 0.95, className: 'flood-tooltip' },
+    )
 
     ;(poly as any).__meta = { seg }
     criticalLayer.addLayer(poly)
@@ -642,10 +722,7 @@ function drawCritical(p: CriticalSegmentsNearFloodResponse) {
 
 function highlightSegmentAt(idx: number) {
   if (!criticalLayer) return
-  if (highlighted) {
-    map.removeLayer(highlighted)
-    highlighted = null
-  }
+  clearHighlight()
 
   let i = 0
   let target: L.Polyline | null = null
@@ -674,8 +751,182 @@ function highlightSegmentAt(idx: number) {
   }
 }
 
-/* ── watchers ── */
-watch([filteredLocations, filteredEvents, activeTab], () => {
+/* ─────────────────────────────────────────────────────────────
+   ROAD CRITICALITY MODE (GLOBAL ROAD CENTRALITY)
+   ───────────────────────────────────────────────────────────── */
+const roadQuery = ref('')
+const roadFeatures = ref<GeoFeature[]>([])
+const topFeatures  = ref<GeoFeature[]>([])
+const roadLoading  = ref(false)
+const roadError    = ref<string | null>(null)
+
+function getBetweennessRange(features: any[]) {
+  let min = +Infinity; let max = -Infinity
+  for (const f of features || []) {
+    const b = Number(f?.properties?.betweenness)
+    if (Number.isFinite(b)) {
+      if (b < min) min = b
+      if (b > max) max = b
+    }
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) { min = 0; max = 1 }
+  if (min === max) max = min + 1e-9
+  return { min, max }
+}
+function hueForT(t: number, hStart = 220, hEnd = 0) {
+  const h = hStart + (hEnd - hStart) * t
+  return `hsl(${h}, 85%, 50%)`
+}
+function colorByBetweenness(b: number, min: number, max: number) {
+  if (!Number.isFinite(b)) return '#999'
+  const t = (b - min) / (max - min)
+  return hueForT(Math.min(1, Math.max(0, t)))
+}
+
+function removeRoadLegend() {
+  if (roadLegend && map) {
+    map.removeControl(roadLegend)
+    roadLegend = null
+  }
+}
+function addOrUpdateRoadLegend(min: number, max: number) {
+  if (!map) return
+  removeRoadLegend()
+  const legend = new L.Control({ position: 'bottomright' })
+  ;(legend as any).onAdd = () => {
+    const div = L.DomUtil.create('div', 'legend-box')
+    div.innerHTML = `
+      <div class="legend-title">Betweenness</div>
+      <div class="legend-gradient"></div>
+      <div class="legend-scale">
+        <span>${min.toExponential(2)}</span>
+        <span>${max.toExponential(2)}</span>
+      </div>`
+    return div
+  }
+  legend.addTo(map)
+  roadLegend = legend
+}
+
+function drawRoadCritical(features: GeoFeature[]) {
+  clearRoadCritical()
+  roadCriticalLayer = L.layerGroup().addTo(map)
+  const bounds = L.latLngBounds([])
+
+  const { min, max } = getBetweennessRange(features as any[])
+  addOrUpdateRoadLegend(min, max)
+
+  for (const f of features) {
+    const coords = f?.geometry?.coordinates || []
+    if (!Array.isArray(coords) || !coords.length) continue
+
+    const latlngs: [number, number][] = []
+    for (const [lon, lat] of coords) {
+      latlngs.push([lat, lon])
+      bounds.extend([lat, lon])
+    }
+
+    const name = (f.properties?.road_name && String(f.properties.road_name).trim())
+      ? String(f.properties.road_name)
+      : 'Unnamed Road'
+    const rank = f.properties?.rank
+    const braw = Number(f.properties?.betweenness)
+    const nb   = Number(f.properties?.norm_betweenness)
+    const color = colorByBetweenness(braw, min, max)
+
+    const poly = L.polyline(latlngs, {
+      color,
+      weight: 5,
+      opacity: 0.95,
+    }).bindTooltip(
+      `
+        <div class="flood-tt">
+          <div class="tt-title">${name}</div>
+          <div class="tt-subtle">Rank: ${rank ?? '—'}</div>
+          <table class="tt-table" style="margin-top:6px;">
+            <tr><th>Betweenness</th><td>${Number(braw).toExponential(6)}</td></tr>
+            <tr><th>Norm. Betweenness</th><td>${Number(nb).toFixed(6)}</td></tr>
+          </table>
+        </div>`,
+      { sticky: true, direction: 'top', opacity: 0.95, className: 'flood-tooltip' },
+    )
+
+    ;(poly as any).__meta = { feature: f }
+    roadCriticalLayer.addLayer(poly)
+  }
+
+  if (bounds.isValid()) map.fitBounds(bounds.pad(0.12))
+}
+
+function highlightRoadSegment(idx: number) {
+  if (!roadCriticalLayer) return
+  clearHighlight()
+
+  let i = 0; let target: L.Polyline | null = null
+  roadCriticalLayer.eachLayer((l: any) => {
+    if (l instanceof L.Polyline) {
+      if (i === idx) target = l
+      i++
+    }
+  })
+
+  if (target) {
+    const latlngs = (target as any).getLatLngs?.() as L.LatLng[] | L.LatLng[][]
+    const flat = Array.isArray(latlngs?.[0])
+      ? (latlngs as L.LatLng[][]).flat()
+      : (latlngs as L.LatLng[])
+
+    if (flat?.length) {
+      highlighted = L.polyline(flat, {
+        color: '#7c3aed',
+        weight: 7,
+        opacity: 0.95,
+      }).addTo(map)
+      map.fitBounds(L.latLngBounds(flat as any).pad(0.2))
+    }
+  }
+}
+
+async function loadTopRoadCritical() {
+  roadLoading.value = true
+  roadError.value = null
+  try {
+    const fc = await getTopCriticalSegments(50) as any
+    topFeatures.value = Array.isArray(fc?.features) ? fc.features : []
+    if (activeTab.value === 'critical' && activeCriticalMode.value === 'road') {
+      drawRoadCritical(topFeatures.value)
+    }
+  } catch (e: any) {
+    roadError.value = e?.message || 'Failed to load top critical segments.'
+  } finally {
+    roadLoading.value = false
+  }
+}
+
+async function searchRoadCritical() {
+  const name = roadQuery.value.trim()
+  if (!name) {
+    drawRoadCritical(topFeatures.value)
+    roadFeatures.value = []
+    return
+  }
+  roadLoading.value = true
+  roadError.value = null
+  try {
+    const fc = await getRoadCriticality(name) as any
+    roadFeatures.value = Array.isArray(fc?.features) ? fc.features : []
+    drawRoadCritical(roadFeatures.value)
+  } catch (e: any) {
+    roadError.value = e?.message || 'Failed to search road criticality.'
+  } finally {
+    roadLoading.value = false
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   WATCHERS
+   ───────────────────────────────────────────────────────────── */
+watch([filteredLocations, filteredEventsCritical, activeTab], () => {
   rerenderMarkersForActiveTab()
 })
 
@@ -688,16 +939,49 @@ watch(bufferM, () => {
   }, 400)
 })
 
-watch(activeTab, () => {
+watch(activeTab, (tab) => {
+  // leaving Critical tab: clean up all critical overlays
+  if (tab !== 'critical') {
+    clearCritical()
+    clearRoadCritical()
+    selectedFloodId.value = null
+    lastPayload.value = null
+    infoMsg.value = null
+  }
+})
+
+watch(activeCriticalMode, mode => {
   clearCritical()
-  clearSegments()
+  clearRoadCritical()
   selectedFloodId.value = null
   lastPayload.value = null
   infoMsg.value = null
-  rerenderMarkersForActiveTab()
+
+  if (mode === 'road') {
+    if (topFeatures.value.length) {
+      drawRoadCritical(topFeatures.value)
+    } else {
+      loadTopRoadCritical()
+    }
+  }
 })
 
-/* ── lifecycle ── */
+// 🔁 React to the single flood-marker toggle
+watch(showFloodMarkers, val => {
+  if (!map) return
+  if (!val) {
+    if (markersLayer) {
+      map.removeLayer(markersLayer)
+      markersLayer = null
+    }
+  } else {
+    rerenderMarkersForActiveTab()
+  }
+})
+
+/* ─────────────────────────────────────────────────────────────
+   LIFECYCLE
+   ───────────────────────────────────────────────────────────── */
 onMounted(async () => {
   ensureMap()
   try {
@@ -707,7 +991,7 @@ onMounted(async () => {
       getUniqueFloodEventsByLocation().catch(() => []),
     ])
 
-    // locations tab base data
+    // locations tab
     eventsMaster.value = Array.isArray(events) ? events : []
     eventsLocations.value = eventsMaster.value.slice()
 
@@ -718,7 +1002,7 @@ onMounted(async () => {
     }))
     floodLocations.value = locationsMasterAgg.value.slice()
 
-    // critical tab base list
+    // critical tab event list
     uniqueEvents.value = (Array.isArray(uniques) ? uniques : []).map((u: any) => ({
       flood_id: Number(u.flood_id),
       flooded_location: String(u.flooded_location ?? ''),
@@ -728,12 +1012,15 @@ onMounted(async () => {
     }))
   } finally {
     loadingLocations.value = false
-    loadingEvents.value    = false
+    loadingEvents.value = false
     await nextTick()
     rerenderMarkersForActiveTab()
   }
 
-  // support deep link (?flood_id=&buffer_m=)
+  // pre-load top-50 road criticality
+  loadTopRoadCritical()
+
+  // deep link (?flood_id=&buffer_m=)
   const qs = new URLSearchParams(window.location.search)
   const fid = Number(qs.get('flood_id'))
   const buf = Number(qs.get('buffer_m'))
@@ -741,6 +1028,7 @@ onMounted(async () => {
   if (Number.isFinite(fid) && fid > 0) {
     selectedFloodId.value = fid
     activeTab.value = 'critical'
+    activeCriticalMode.value = 'flood'
     await nextTick()
     rerenderMarkersForActiveTab()
     fetchAndDrawCritical(fid)
@@ -752,12 +1040,11 @@ onMounted(async () => {
   <!-- page wrapper -->
   <div class="min-h-screen bg-gradient-to-br from-[#ecfeff] via-[#f8fafc] to-[#eef2ff] text-gray-800 p-5">
     <div class="grid grid-cols-12 gap-5 h-[calc(100vh-2rem)]">
-      
+
       <!-- LEFT SIDEBAR / CONTROL PANEL -->
       <aside class="col-span-4 flex flex-col gap-4 min-h-0">
-        <!-- header + tab switcher card -->
+        <!-- header + main tabs -->
         <div class="rounded-2xl border border-sky-200 bg-white/90 shadow-sm backdrop-blur-sm p-4">
-          <!-- mini brand -->
           <div class="flex items-start gap-3 mb-4">
             <div class="h-10 w-10 flex items-center justify-center rounded-xl bg-sky-600 text-white font-bold text-sm shadow">
               🌊
@@ -765,42 +1052,43 @@ onMounted(async () => {
             <div>
               <div class="text-sm font-semibold text-gray-900">Flood Operations</div>
               <div class="text-[11px] text-gray-500 leading-snug">
-                Historical flood clusters & nearby critical roads
+                Historical flood clusters &amp; nearby critical roads
               </div>
             </div>
           </div>
 
-          <!-- tabs -->
+          <!-- MAIN TABS -->
           <div class="rounded-xl bg-sky-50/70 border border-sky-200 p-1 text-[13px] font-semibold shadow-inner flex gap-2">
             <button
-              v-for="t in [{ key: 'locations', label: 'Flood Locations 🌧️' }, { key: 'critical', label: 'Critical Roads 🚧' }]"
-              :key="t.key"
               class="flex-1 py-2 rounded-lg transition-all duration-200 text-center leading-snug"
-              :class="activeTab===t.key
-                ? (t.key === 'critical'
-                    ? 'bg-[#dc2626] text-white shadow-md shadow-[#dc2626]/30'
-                    : 'bg-sky-600 text-white shadow-md shadow-sky-600/30')
-                : (t.key === 'critical'
-                    ? 'bg-white text-[#dc2626] border border-[#dc2626]/30 hover:bg-red-50'
-                    : 'bg-white text-sky-700 border border-sky-400/30 hover:bg-sky-50')"
-              @click="activeTab = t.key as any"
+              :class="activeTab === 'locations'
+                ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
+                : 'bg-white text-sky-700 border border-sky-400/30 hover:bg-sky-50'"
+              @click="activeTab = 'locations'"
             >
-              {{ t.label }}
+              Flood Locations 🌧️
+            </button>
+            <button
+              class="flex-1 py-2 rounded-lg transition-all duration-200 text-center leading-snug"
+              :class="activeTab === 'critical'
+                ? 'bg-[#dc2626] text-white shadow-md shadow-[#dc2626]/30'
+                : 'bg-white text-[#dc2626] border border-[#dc2626]/30 hover:bg-red-50'"
+              @click="activeTab = 'critical'"
+            >
+              Critical Roads 🚧
             </button>
           </div>
         </div>
 
         <!-- LOCATIONS TAB CONTENT -->
         <div
-          v-if="activeTab==='locations'"
+          v-if="activeTab === 'locations'"
           class="flex flex-col gap-4 min-h-0 overflow-y-auto pr-1"
         >
-          <!-- Summary -->
+          <!-- summary -->
           <div class="rounded-2xl border border-gray-200 bg-white/90 shadow-sm backdrop-blur-sm p-4">
             <div class="text-sm font-semibold text-gray-800 flex items-center gap-2">
-              <span
-                class="inline-flex items-center justify-center rounded bg-sky-600 text-white text-[10px] font-bold leading-none h-5 px-2 shadow"
-              >
+              <span class="inline-flex items-center justify-center rounded bg-sky-600 text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
                 TOP
               </span>
               <span>Flood-Prone Locations</span>
@@ -811,7 +1099,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <!-- Date Filter -->
+          <!-- date filter -->
           <div class="rounded-2xl border border-gray-200 bg-white/90 shadow-sm backdrop-blur-sm p-4">
             <div class="text-[12px] font-medium text-gray-700 mb-2 flex items-center gap-2">
               <span class="inline-flex items-center justify-center rounded bg-sky-600 text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
@@ -822,19 +1110,11 @@ onMounted(async () => {
             <div class="grid grid-cols-2 gap-3 items-start text-[12px] text-gray-700">
               <div class="space-y-1">
                 <div class="text-[11px] text-gray-500 font-medium">Start date</div>
-                <input
-                  v-model="startDate"
-                  type="date"
-                  class="w-full px-2 py-1 border rounded text-sm"
-                />
+                <input v-model="startDate" type="date" class="w-full px-2 py-1 border rounded text-sm" />
               </div>
               <div class="space-y-1">
                 <div class="text-[11px] text-gray-500 font-medium">End date</div>
-                <input
-                  v-model="endDate"
-                  type="date"
-                  class="w-full px-2 py-1 border rounded text-sm"
-                />
+                <input v-model="endDate" type="date" class="w-full px-2 py-1 border rounded text-sm" />
               </div>
             </div>
             <div class="flex gap-2 mt-3">
@@ -846,21 +1126,15 @@ onMounted(async () => {
               </button>
               <button
                 class="px-3 py-1.5 text-sm rounded-md font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition disabled:opacity-40 disabled:cursor-not-allowed"
-                @click="clearDateFilter"
                 :disabled="!filteringByDate"
+                @click="clearDateFilter"
               >
                 Clear
               </button>
             </div>
-            <div
-              v-if="filteringByDate"
-              class="text-[11px] text-gray-500 leading-snug mt-2"
-            >
-              Server-side filtered by date range.
-            </div>
           </div>
 
-          <!-- Filters / Controls -->
+          <!-- filters -->
           <div class="rounded-2xl border border-gray-200 bg-white/90 shadow-sm backdrop-blur-sm p-4">
             <div class="text-[12px] font-medium text-gray-700 mb-2 flex items-center gap-2">
               <span class="inline-flex items-center justify-center rounded bg-sky-600 text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
@@ -879,42 +1153,23 @@ onMounted(async () => {
             <div class="grid grid-cols-2 gap-3 text-[12px] text-gray-700">
               <div class="flex flex-col gap-1">
                 <label class="text-[11px] text-gray-500 font-medium">Min count</label>
-                <input
-                  v-model.number="minCount"
-                  type="number"
-                  min="0"
-                  class="w-full px-2 py-1 border rounded text-sm"
-                />
+                <input v-model.number="minCount" type="number" min="0" class="w-full px-2 py-1 border rounded text-sm" />
               </div>
-
               <div class="flex flex-col gap-1">
                 <label class="text-[11px] text-gray-500 font-medium">Top N</label>
-                <input
-                  v-model.number="topN"
-                  type="number"
-                  min="1"
-                  class="w-full px-2 py-1 border rounded text-sm"
-                />
+                <input v-model.number="topN" type="number" min="1" class="w-full px-2 py-1 border rounded text-sm" />
               </div>
-
               <div class="flex flex-col gap-1">
                 <label class="text-[11px] text-gray-500 font-medium">Sort by</label>
-                <select
-                  v-model="sortBy"
-                  class="px-2 py-1 border rounded text-sm"
-                >
+                <select v-model="sortBy" class="px-2 py-1 border rounded text-sm">
                   <option value="count">Count</option>
                   <option value="name">Name</option>
                   <option value="delay">Delay</option>
                 </select>
               </div>
-
               <div class="flex flex-col gap-1">
                 <label class="text-[11px] text-gray-500 font-medium">Direction</label>
-                <select
-                  v-model="sortDir"
-                  class="px-2 py-1 border rounded text-sm"
-                >
+                <select v-model="sortDir" class="px-2 py-1 border rounded text-sm">
                   <option value="desc">Desc</option>
                   <option value="asc">Asc</option>
                 </select>
@@ -932,13 +1187,11 @@ onMounted(async () => {
             </div>
           </div>
 
-          <!-- Results table -->
+          <!-- table -->
           <div class="rounded-2xl border border-gray-200 bg-white/90 shadow-sm backdrop-blur-sm p-4 min-h-[10rem] flex flex-col">
             <div class="flex items-start justify-between mb-2">
               <div class="text-sm font-semibold text-gray-800 flex items-center gap-2">
-                <span
-                  class="inline-flex items-center justify-center rounded bg-sky-600 text-white text-[10px] font-bold leading-none h-5 px-2 shadow"
-                >
+                <span class="inline-flex items-center justify-center rounded bg-sky-600 text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
                   📍
                 </span>
                 <span>Locations</span>
@@ -948,13 +1201,8 @@ onMounted(async () => {
               </div>
             </div>
 
-            <div v-if="loadingLocations" class="text-gray-500 text-sm">
-              Loading…
-            </div>
-
-            <div v-else-if="!floodLocations.length" class="text-gray-500 text-sm">
-              No flood data available.
-            </div>
+            <div v-if="loadingLocations" class="text-gray-500 text-sm">Loading…</div>
+            <div v-else-if="!floodLocations.length" class="text-gray-500 text-sm">No flood data available.</div>
 
             <div v-else class="overflow-x-auto max-h-[28vh]">
               <table class="min-w-full text-sm border border-gray-200">
@@ -970,8 +1218,8 @@ onMounted(async () => {
                     v-for="loc in filteredLocations"
                     :key="loc.location"
                     class="hover:bg-sky-50 cursor-pointer"
-                    @click="focusLocation(loc.location)"
                     :title="`Zoom to ${loc.location}`"
+                    @click="focusLocation(loc.location)"
                   >
                     <td class="px-2 py-1 border border-gray-200 text-gray-800">
                       {{ loc.location }}
@@ -980,9 +1228,11 @@ onMounted(async () => {
                       {{ loc.count }}
                     </td>
                     <td class="px-2 py-1 border border-gray-200 text-right text-gray-700">
-                      {{ Number.isFinite(loc.time_travel_delay_min)
-                        ? (loc.time_travel_delay_min as number).toFixed(2)
-                        : '—' }}
+                      {{
+                        Number.isFinite(loc.time_travel_delay_min)
+                          ? (loc.time_travel_delay_min as number).toFixed(2)
+                          : '—'
+                      }}
                     </td>
                   </tr>
                 </tbody>
@@ -991,223 +1241,318 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- CRITICAL TAB CONTENT -->
+        <!-- CRITICAL ROADS TAB CONTENT -->
         <div
           v-else
           class="flex flex-col gap-4 min-h-0 overflow-y-auto pr-1"
         >
-          <!-- Critical controls -->
+          <!-- SUB-TABS: FLOOD / ROAD -->
           <div class="rounded-2xl border border-red-200 bg-white/90 shadow-sm backdrop-blur-sm p-4">
-            <div class="text-sm font-semibold text-gray-800 flex items-center gap-2 mb-3">
-              <span
-                class="inline-flex items-center justify-center rounded bg-[#dc2626] text-white text-[10px] font-bold leading-none h-5 px-2 shadow"
-              >
-                ⚠
+            <div class="text-[12px] font-medium text-gray-700 mb-3 flex items-center gap-2">
+              <span class="inline-flex items-center justify-center rounded bg-[#dc2626] text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
+                🚧
               </span>
-              <span>Critical Roads Near Flood</span>
+              <span>Critical Road Segments</span>
             </div>
 
-            <div class="grid grid-cols-2 gap-3 text-[12px] text-gray-700">
-              <div class="flex flex-col gap-1">
-                <label class="text-[11px] text-gray-500 font-medium">Buffer (m)</label>
-                <input
-                  v-model.number="bufferM"
-                  type="number"
-                  min="1"
-                  step="1"
-                  class="px-2 py-1 border rounded text-sm"
-                />
-              </div>
-
-              <div class="flex flex-col gap-1">
-                <label class="text-[11px] text-gray-500 font-medium">Filter events</label>
-                <input
-                  v-model="qEvents"
-                  type="text"
-                  placeholder="e.g. Yishun or 107"
-                  class="px-2 py-1 border rounded text-sm"
-                />
-              </div>
-
-              <div class="flex flex-col gap-1">
-                <label class="text-[11px] text-gray-500 font-medium">Sort by</label>
-                <select
-                  v-model="sortByCrit"
-                  class="px-2 py-1 border rounded text-sm"
-                >
-                  <option value="delay">Delay</option>
-                  <option value="name">Name</option>
-                  <option value="id">Flood ID</option>
-                </select>
-              </div>
-
-              <div class="flex flex-col gap-1">
-                <label class="text-[11px] text-gray-500 font-medium">Direction</label>
-                <select
-                  v-model="sortDirCrit"
-                  class="px-2 py-1 border rounded text-sm"
-                >
-                  <option value="desc">Desc</option>
-                  <option value="asc">Asc</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="text-[11px] text-gray-600 leading-snug mt-3 space-y-1">
-              <div>
-                Loaded events:
-                <span class="font-semibold text-gray-800">{{ uniqueEvents.length }}</span>
-              </div>
-              <div>
-                Showing:
-                <span class="font-semibold text-gray-800">{{ filteredEvents.length }}</span>
-              </div>
-              <div v-if="lastPayload">
-                Flood
-                <span class="font-semibold text-gray-800">{{ (lastPayload as any).flood_id }}</span>
-                • Segments:
-                <span class="font-semibold text-gray-800">{{ (lastPayload as any).count_critical_segments }}</span>
-              </div>
-              <div v-if="errorMsg" class="text-red-600">
-                {{ errorMsg }}
-              </div>
+            <div class="rounded-xl bg-red-50/60 border border-red-200 p-1 text-[13px] font-semibold shadow-inner flex gap-2">
+              <button
+                class="flex-1 py-2 rounded-lg transition-all duration-200 text-center leading-snug"
+                :class="activeCriticalMode === 'flood'
+                  ? 'bg-[#dc2626] text-white shadow-md shadow-[#dc2626]/30'
+                  : 'bg-white text-[#dc2626] border border-[#dc2626]/30 hover:bg-red-50'"
+                @click="activeCriticalMode = 'flood'"
+              >
+                Flood Mode
+              </button>
+              <button
+                class="flex-1 py-2 rounded-lg transition-all duration-200 text-center leading-snug"
+                :class="activeCriticalMode === 'road'
+                  ? 'bg-sky-700 text-white shadow-md shadow-sky-700/30'
+                  : 'bg-white text-sky-700 border border-sky-400/30 hover:bg-sky-50'"
+                @click="activeCriticalMode = 'road'"
+              >
+                Road Criticality Mode
+              </button>
             </div>
           </div>
 
-          <!-- Flood Events list -->
-          <div class="rounded-2xl border border-red-200 bg-white/90 shadow-sm backdrop-blur-sm p-4 min-h-[12rem] flex flex-col">
-            <div class="flex items-start justify-between mb-2">
-              <div class="text-sm font-semibold text-gray-800 flex items-center gap-2">
-                <span
-                  class="inline-flex items-center justify-center rounded bg-[#dc2626] text-white text-[10px] font-bold leading-none h-5 px-2 shadow"
-                >
-                  🌧
+          <!-- FLOOD MODE CONTENT -->
+          <template v-if="activeCriticalMode === 'flood'">
+            <div class="rounded-2xl border border-red-200 bg-white/90 shadow-sm backdrop-blur-sm p-4">
+              <div class="text-sm font-semibold text-gray-800 flex items-center gap-2 mb-3">
+                <span class="inline-flex items-center justify-center rounded bg-[#dc2626] text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
+                  ⚠
                 </span>
-                <span>Flood Events</span>
+                <span>Critical Roads Near Flood</span>
               </div>
-              <div class="text-[11px] text-gray-500 leading-snug">
-                Click a row to draw nearby critical segments
+
+              <div class="grid grid-cols-2 gap-3 text-[12px] text-gray-700">
+                <div class="flex flex-col gap-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Buffer (m)</label>
+                  <input
+                    v-model.number="bufferM"
+                    type="number"
+                    min="1"
+                    step="1"
+                    class="px-2 py-1 border rounded text-sm"
+                  />
+                </div>
+
+                <div class="flex flex-col gap-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Filter events</label>
+                  <input
+                    v-model="qEvents"
+                    type="text"
+                    placeholder="e.g. Yishun or 107"
+                    class="px-2 py-1 border rounded text-sm"
+                  />
+                </div>
+
+                <div class="flex flex-col gap-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Sort by</label>
+                  <select v-model="sortByCrit" class="px-2 py-1 border rounded text-sm">
+                    <option value="delay">Delay</option>
+                    <option value="name">Name</option>
+                    <option value="id">Flood ID</option>
+                  </select>
+                </div>
+
+                <div class="flex flex-col gap-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Direction</label>
+                  <select v-model="sortDirCrit" class="px-2 py-1 border rounded text-sm">
+                    <option value="desc">Desc</option>
+                    <option value="asc">Asc</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="text-[11px] text-gray-600 leading-snug mt-3 space-y-1">
+                <div>
+                  Loaded events:
+                  <span class="font-semibold text-gray-800">{{ uniqueEvents.length }}</span>
+                </div>
+                <div>
+                  Showing:
+                  <span class="font-semibold text-gray-800">{{ filteredEventsCritical.length }}</span>
+                </div>
+                <div v-if="lastPayload">
+                  Flood
+                  <span class="font-semibold text-gray-800">{{ (lastPayload as any).flood_id }}</span>
+                  • Segments:
+                  <span class="font-semibold text-gray-800">{{ (lastPayload as any).count_critical_segments }}</span>
+                </div>
+                <div v-if="errorMsg" class="text-red-600">
+                  {{ errorMsg }}
+                </div>
               </div>
             </div>
 
-            <div v-if="loadingEvents" class="text-gray-500 text-sm">
-              Loading…
+            <!-- Flood events list -->
+            <div class="rounded-2xl border border-red-200 bg-white/90 shadow-sm backdrop-blur-sm p-4 min-h-[12rem] flex flex-col">
+              <div class="flex items-start justify-between mb-2">
+                <div class="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                  <span class="inline-flex items-center justify-center rounded bg-[#dc2626] text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
+                    🌧
+                  </span>
+                  <span>Flood Events</span>
+                </div>
+                <div class="text-[11px] text-gray-500 leading-snug">
+                  Click a row to draw nearby critical segments
+                </div>
+              </div>
+
+              <div v-if="loadingEvents" class="text-gray-500 text-sm">Loading…</div>
+              <div v-else-if="!uniqueEvents.length" class="text-gray-500 text-sm">No flood events.</div>
+
+              <div v-else class="max-h-[28vh] overflow-auto">
+                <table class="min-w-full text-sm border border-gray-200">
+                  <thead class="bg-red-50/80 text-red-800 sticky top-0 text-xs uppercase tracking-wide">
+                    <tr>
+                      <th class="px-2 py-1 border border-gray-200 text-right w-[4rem]">ID</th>
+                      <th class="px-2 py-1 border border-gray-200 text-left">Location</th>
+                      <th class="px-2 py-1 border border-gray-200 text-right">Delay (min)</th>
+                    </tr>
+                  </thead>
+                  <tbody class="bg-white/70">
+                    <tr
+                      v-for="e in filteredEventsCritical"
+                      :key="e.flood_id"
+                      class="hover:bg-red-50 cursor-pointer"
+                      :title="`Zoom & draw critical segments for Flood ${e.flood_id}`"
+                      @click="onSelectFloodId(e.flood_id)"
+                    >
+                      <td class="px-2 py-1 border border-gray-200 text-right text-gray-800">{{ e.flood_id }}</td>
+                      <td class="px-2 py-1 border border-gray-200 text-gray-800">{{ e.flooded_location || 'Flood event' }}</td>
+                      <td class="px-2 py-1 border border-gray-200 text-right text-gray-800">
+                        {{
+                          Number.isFinite(+e.time_travel_delay_min!)
+                            ? (+e.time_travel_delay_min!).toFixed(2)
+                            : '—'
+                        }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
-            <div v-else-if="!uniqueEvents.length" class="text-gray-500 text-sm">
-              No flood events.
-            </div>
+            <!-- Critical segments for selected flood -->
+            <div class="rounded-2xl border border-red-200 bg-white/90 shadow-sm backdrop-blur-sm p-4 min-h-[10rem] flex flex-col">
+              <div class="flex items-start justify-between mb-2">
+                <div class="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                  <span class="inline-flex items-center justify-center rounded bg-[#dc2626] text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
+                    🚧
+                  </span>
+                  <span>Critical Segments</span>
+                </div>
+                <div class="text-[11px] text-gray-500 leading-snug">Click a row to zoom</div>
+              </div>
 
-            <div v-else class="max-h-[28vh] overflow-auto">
-              <table class="min-w-full text-sm border border-gray-200">
-                <thead class="bg-red-50/80 text-red-800 sticky top-0 text-xs uppercase tracking-wide">
-                  <tr>
-                    <th class="px-2 py-1 border border-gray-200 text-right w-[4rem]">ID</th>
-                    <th class="px-2 py-1 border border-gray-200 text-left">Location</th>
-                    <th class="px-2 py-1 border border-gray-200 text-right">Delay (min)</th>
-                  </tr>
-                </thead>
-                <tbody class="bg-white/70">
-                  <tr
-                    v-for="e in filteredEvents"
-                    :key="e.flood_id"
-                    class="hover:bg-red-50 cursor-pointer"
-                    @click="onSelectFloodId(e.flood_id)"
-                    :title="`Zoom & draw critical segments for Flood ${e.flood_id}`"
-                  >
-                    <td class="px-2 py-1 border border-gray-200 text-right text-gray-800">{{ e.flood_id }}</td>
-                    <td class="px-2 py-1 border border-gray-200 text-gray-800">{{ e.flooded_location || 'Flood event' }}</td>
-                    <td class="px-2 py-1 border border-gray-200 text-right text-gray-800">
-                      {{ Number.isFinite(+e.time_travel_delay_min!)
-                        ? (+e.time_travel_delay_min!).toFixed(2)
-                        : '—' }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
+              <div
+                v-if="selectedFloodId !== null && lastPayload && !(lastPayload as any).critical_segments?.length"
+                class="text-sm text-amber-700"
+              >
+                {{ infoMsg || 'No critical roads near flood.' }}
+              </div>
 
-          <!-- Critical Segments -->
-          <div
-            class="rounded-2xl border border-red-200 bg-white/90 shadow-sm backdrop-blur-sm p-4 min-h-[10rem] flex flex-col"
-          >
-            <div class="flex items-start justify-between mb-2">
-              <div class="text-sm font-semibold text-gray-800 flex items-center gap-2">
-                <span
-                  class="inline-flex items-center justify-center rounded bg-[#dc2626] text-white text-[10px] font-bold leading-none h-5 px-2 shadow"
+              <div
+                v-else-if="selectedFloodId !== null && lastPayload && (lastPayload as any).critical_segments?.length"
+                class="max-h-[28vh] overflow-auto"
+              >
+                <table class="min-w-full text-sm border border-gray-200">
+                  <thead class="bg-red-50/80 text-red-800 sticky top-0 text-xs uppercase tracking-wide">
+                    <tr>
+                      <th class="px-2 py-1 border border-gray-200 text-left">Road</th>
+                      <th class="px-2 py-1 border border-gray-200 text-left">Type</th>
+                      <th class="px-2 py-1 border border-gray-200 text-right">Len (m)</th>
+                      <th class="px-2 py-1 border border-gray-200 text-right">Centrality</th>
+                    </tr>
+                  </thead>
+                  <tbody class="bg-white/70">
+                    <tr
+                      v-for="(seg, idx) in (lastPayload as any).critical_segments"
+                      :key="idx"
+                      class="hover:bg-red-50 cursor-pointer"
+                      @click="highlightSegmentAt(idx)"
+                    >
+                      <td class="px-2 py-1 border border-gray-200 text-gray-800">
+                        {{
+                          (typeof seg.road_name === 'string' && seg.road_name.trim())
+                            ? seg.road_name
+                            : 'Unnamed Road'
+                        }}
+                      </td>
+                      <td class="px-2 py-1 border border-gray-200 text-gray-800">
+                        {{ seg.road_type || '—' }}
+                      </td>
+                      <td class="px-2 py-1 border border-gray-200 text-right text-gray-800">
+                        {{ Number(seg.length_m).toFixed(2) }}
+                      </td>
+                      <td class="px-2 py-1 border border-gray-200 text-right text-gray-800">
+                        {{ Number(seg.centrality_score).toFixed(6) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div v-else class="text-sm text-gray-500">
+                Select a flood event to see critical segments.
+              </div>
+            </div>
+          </template>
+
+          <!-- ROAD CRITICALITY MODE CONTENT -->
+          <template v-else>
+            <div class="rounded-2xl border border-red-200 bg-white/90 shadow-sm backdrop-blur-sm p-4">
+              <div class="text-sm font-semibold text-gray-800 mb-3">Road Criticality</div>
+
+              <div class="grid grid-cols-3 gap-2">
+                <div class="col-span-2">
+                  <input
+                    v-model="roadQuery"
+                    type="text"
+                    placeholder="Search road name e.g. Pan-Island Expressway"
+                    class="px-2 py-1 border rounded text-sm w-full"
+                    @keydown.enter="searchRoadCritical"
+                  />
+                </div>
+                <button
+                  class="px-2 py-1 border rounded text-sm bg-gray-50 hover:bg-gray-100"
+                  @click="searchRoadCritical"
                 >
-                  🚧
-                </span>
-                <span>Critical Segments</span>
+                  Search
+                </button>
               </div>
-              <div class="text-[11px] text-gray-500 leading-snug">
-                Click a row to zoom
+
+              <div class="text-xs text-gray-600 mt-2">
+                Shows Top 50 by default. Enter a road name to filter by name.
+              </div>
+
+              <div v-if="roadError" class="text-xs text-red-600 mt-1">{{ roadError }}</div>
+              <div v-if="roadLoading" class="text-sm text-gray-500 mt-1">Loading…</div>
+            </div>
+
+            <div class="rounded-2xl border border-red-200 bg-white/90 shadow-sm backdrop-blur-sm p-4 flex-1 min-h-[10rem] flex flex-col">
+              <div class="flex items-start justify-between mb-2">
+                <div class="text-sm font-semibold text-gray-800">
+                  {{ roadQuery ? 'Search Results' : 'Top 50 Critical Segments' }}
+                </div>
+                <div class="text-[11px] text-gray-500 leading-snug">
+                  Click a row to zoom
+                </div>
+              </div>
+
+              <div class="max-h-[60vh] overflow-auto">
+                <table class="min-w-full text-sm">
+                  <thead class="bg-gray-100 text-gray-700 sticky top-0">
+                    <tr>
+                      <th class="px-2 py-1 border text-right">Rank</th>
+                      <th class="px-2 py-1 border text-left">Road</th>
+                      <th class="px-2 py-1 border text-left">Type</th>
+                      <th class="px-2 py-1 border text-right">Betw.</th>
+                      <th class="px-2 py-1 border text-right">Norm</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="(f, idx) in (roadQuery ? roadFeatures : topFeatures)"
+                      :key="idx"
+                      class="hover:bg-gray-50 cursor-pointer"
+                      @click="highlightRoadSegment(idx)"
+                    >
+                      <td class="px-2 py-1 border text-right">
+                        {{ f?.properties?.rank ?? '—' }}
+                      </td>
+                      <td class="px-2 py-1 border">
+                        {{
+                          (f?.properties?.road_name && String(f.properties.road_name).trim())
+                            ? f.properties.road_name
+                            : 'Unnamed Road'
+                        }}
+                      </td>
+                      <td class="px-2 py-1 border">
+                        {{ f?.properties?.road_type ?? '—' }}
+                      </td>
+                      <td class="px-2 py-1 border text-right">
+                        {{ Number(f?.properties?.betweenness).toExponential(2) }}
+                      </td>
+                      <td class="px-2 py-1 border text-right">
+                        {{ Number(f?.properties?.norm_betweenness).toFixed(6) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
-
-            <div
-              v-if="selectedFloodId !== null && lastPayload && !(lastPayload as any).critical_segments?.length"
-              class="text-sm text-amber-700"
-            >
-              {{ infoMsg || 'No critical roads near flood.' }}
-            </div>
-
-            <div
-              v-else-if="selectedFloodId !== null && lastPayload && (lastPayload as any).critical_segments?.length"
-              class="max-h-[28vh] overflow-auto"
-            >
-              <table class="min-w-full text-sm border border-gray-200">
-                <thead class="bg-red-50/80 text-red-800 sticky top-0 text-xs uppercase tracking-wide">
-                  <tr>
-                    <th class="px-2 py-1 border border-gray-200 text-left">Road</th>
-                    <th class="px-2 py-1 border border-gray-200 text-left">Type</th>
-                    <th class="px-2 py-1 border border-gray-200 text-right">Len (m)</th>
-                    <th class="px-2 py-1 border border-gray-200 text-right">Centrality</th>
-                  </tr>
-                </thead>
-                <tbody class="bg-white/70">
-                  <tr
-                    v-for="(seg, idx) in (lastPayload as any).critical_segments"
-                    :key="idx"
-                    class="hover:bg-red-50 cursor-pointer"
-                    @click="highlightSegmentAt(idx)"
-                  >
-                    <td class="px-2 py-1 border border-gray-200 text-gray-800">
-                      {{ (typeof seg.road_name === 'string' && seg.road_name.trim())
-                          ? seg.road_name
-                          : 'Unnamed Road' }}
-                    </td>
-                    <td class="px-2 py-1 border border-gray-200 text-gray-800">
-                      {{ seg.road_type || '—' }}
-                    </td>
-                    <td class="px-2 py-1 border border-gray-200 text-right text-gray-800">
-                      {{ Number(seg.length_m).toFixed(2) }}
-                    </td>
-                    <td class="px-2 py-1 border border-gray-200 text-right text-gray-800">
-                      {{ Number(seg.centrality_score).toFixed(6) }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <div
-              v-else
-              class="text-sm text-gray-500"
-            >
-              Select a flood event to see critical segments.
-            </div>
-          </div>
+          </template>
         </div>
       </aside>
 
       <!-- RIGHT: MAP PANEL -->
       <section class="col-span-8 min-h-0 flex flex-col">
-        <div
-          class="flex-1 rounded-2xl border-2 border-sky-200 bg-white/80 shadow-inner backdrop-blur-sm relative overflow-hidden"
-        >
-          <!-- map header ribbon -->
+        <div class="flex-1 rounded-2xl border-2 border-sky-200 bg-white/80 shadow-inner backdrop-blur-sm relative overflow-hidden">
           <div
             class="absolute left-0 right-0 top-0 z-[5] flex items-center justify-between text-[11px] text-gray-700 bg-gradient-to-r from-white/80 via-sky-50/70 to-white/80 px-3 py-2 border-b border-sky-200"
           >
@@ -1217,12 +1562,35 @@ onMounted(async () => {
               </span>
               <span>Flood Operations Map</span>
             </span>
-            <span class="text-gray-400">
-              Hover markers for flood details • Click rows to zoom/overlay
-            </span>
+
+            <div class="flex items-center gap-3">
+              <span class="text-gray-400 hidden sm:inline">
+                Hover markers for flood details • Click rows to zoom/overlay
+              </span>
+
+              <!-- 🔘 Single toggle for flood marker layer -->
+              <label class="inline-flex items-center gap-1 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  v-model="showFloodMarkers"
+                  class="sr-only"
+                />
+                <span
+                  class="relative inline-flex h-4 w-7 items-center rounded-full border transition-colors duration-200"
+                  :class="showFloodMarkers ? 'bg-sky-500 border-sky-500' : 'bg-gray-200 border-gray-300'"
+                >
+                  <span
+                    class="h-3 w-3 rounded-full bg-white shadow transform transition-transform duration-200"
+                    :class="showFloodMarkers ? 'translate-x-3' : 'translate-x-0'"
+                  ></span>
+                </span>
+                <span class="text-[11px] text-gray-600">
+                  Flood markers
+                </span>
+              </label>
+            </div>
           </div>
 
-          <!-- Leaflet map -->
           <div class="absolute inset-0 pt-[34px]">
             <div ref="mapEl" class="w-full h-full"></div>
           </div>
@@ -1241,49 +1609,85 @@ onMounted(async () => {
 }
 
 .flood-tt {
-  background:#fff;
-  border:1px solid #e5e7eb;
-  border-radius:8px;
-  box-shadow:0 8px 24px rgba(0,0,0,.12);
-  padding:10px 12px;
-  font:12px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;
-  color:#111827;
-  max-width:260px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 10px 12px;
+  font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
+  color: #111827;
+  max-width: 260px;
 }
 .flood-tt .tt-title {
-  font-weight:600;
-  margin-bottom:2px;
+  font-weight: 600;
+  margin-bottom: 2px;
 }
 .flood-tt .tt-subtle {
-  color:#6b7280;
-  font-size:11px;
-  margin-bottom:8px;
+  color: #6b7280;
+  font-size: 11px;
+  margin-bottom: 8px;
 }
 .flood-tt .tt-section {
-  margin-top:8px;
-  font-weight:600;
-  color:#374151;
+  margin-top: 8px;
+  font-weight: 600;
+  color: #374151;
 }
 .flood-tt .tt-table {
-  width:100%;
-  border-collapse:collapse;
-  margin-top:4px;
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 4px;
 }
 .flood-tt .tt-table th,
 .flood-tt .tt-table td {
-  border:1px solid #e5e7eb;
-  padding:4px 6px;
-  vertical-align:top;
-  font-size:12px;
+  border: 1px solid #e5e7eb;
+  padding: 4px 6px;
+  vertical-align: top;
+  font-size: 12px;
 }
 .flood-tt .tt-table th {
-  width:48%;
-  background:#f9fafb;
-  color:#374151;
-  font-weight:600;
+  width: 48%;
+  background: #f9fafb;
+  color: #374151;
+  font-weight: 600;
 }
 
 .leaflet-marker-icon.flood-pin {
-  filter: drop-shadow(0 2px 6px rgba(0,0,0,.25));
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.25));
+}
+
+/* Legend for betweenness (Road Mode) */
+.legend-box {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 8px 10px;
+  width: 200px;
+  font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
+  color: #111827;
+}
+.legend-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.legend-gradient {
+  height: 10px;
+  border-radius: 4px;
+  margin: 6px 0;
+  background: linear-gradient(
+    to right,
+    hsl(220, 85%, 50%),
+    hsl(180, 85%, 50%),
+    hsl(140, 85%, 50%),
+    hsl(100, 85%, 50%),
+    hsl(60, 85%, 50%),
+    hsl(20, 85%, 50%),
+    hsl(0, 85%, 50%)
+  );
+}
+.legend-scale {
+  display: flex;
+  justify-content: space-between;
+  color: #374151;
 }
 </style>
