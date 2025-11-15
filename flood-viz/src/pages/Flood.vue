@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import * as L from 'leaflet'
+import 'leaflet.markercluster' // 🔹 cluster plugin
 import proj4 from 'proj4'
 import {
   getAllFloodEvents,
@@ -52,11 +53,11 @@ type GeoFeature = {
    ───────────────────────────────────────────────────────────── */
 const mapEl = ref<HTMLDivElement | null>(null)
 let map: L.Map
-let markersLayer: L.LayerGroup | null = null        // flood markers (locations / critical list)
-let segmentLayer: L.LayerGroup | null = null        // flooded road segments (locations tab)
-let criticalLayer: L.LayerGroup | null = null       // critical segments near flood (Flood Mode)
-let roadCriticalLayer: L.LayerGroup | null = null   // global road criticality (Road Mode)
-let highlighted: L.Polyline | null = null           // highlight for any mode
+let markersLayer: L.MarkerClusterGroup | null = null // 🔹 clustered markers
+let segmentLayer: L.LayerGroup | null = null         // flooded road segments (locations tab)
+let criticalLayer: L.LayerGroup | null = null        // critical segments near flood (Flood Mode)
+let roadCriticalLayer: L.LayerGroup | null = null    // global road criticality (Road Mode)
+let highlighted: L.Polyline | null = null            // highlight for any mode
 let drawEpoch = 0
 
 // 🔘 Single toggle for showing/hiding all flood markers
@@ -398,6 +399,37 @@ function makeFloodIcon(selected: boolean) {
   })
 }
 
+/* 🔹 Cluster helper for flood markers */
+function ensureMarkersCluster(): L.MarkerClusterGroup {
+  if (!map) {
+    throw new Error('Map not ready')
+  }
+  if (!markersLayer) {
+    markersLayer = L.markerClusterGroup({
+      chunkedLoading: true,
+      maxClusterRadius: 60,
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+      disableClusteringAtZoom: 16,
+      iconCreateFunction: (cluster) => {
+        const count = cluster.getChildCount()
+        let size = 'small'
+        if (count >= 50) size = 'xl'
+        else if (count >= 20) size = 'lg'
+        else if (count >= 10) size = 'md'
+        return L.divIcon({
+          html: `<div class="cluster-badge ${size}">${count}</div>`,
+          className: 'cluster-wrapper',
+          iconSize: [40, 40],
+        })
+      },
+    }).addTo(map) as L.MarkerClusterGroup
+  } else if (!map.hasLayer(markersLayer)) {
+    markersLayer.addTo(map)
+  }
+  return markersLayer
+}
+
 const groupByLocation = new Map<string, L.LayerGroup>()
 
 function clearSegments() {
@@ -464,8 +496,12 @@ function rerenderMarkersForActiveTab() {
     return
   }
 
-  if (markersLayer) { map.removeLayer(markersLayer); markersLayer = null }
-  markersLayer = L.layerGroup().addTo(map)
+  // reset cluster
+  if (markersLayer) {
+    map.removeLayer(markersLayer)
+    markersLayer = null
+  }
+  const cluster = ensureMarkersCluster()
   const bounds = L.latLngBounds([])
 
   if (activeTab.value === 'locations') {
@@ -479,7 +515,7 @@ function rerenderMarkersForActiveTab() {
       const built = baseMarkerForEvent(e, false)
       if (!built) continue
       const { marker, lat, lon } = built
-      markersLayer.addLayer(marker)
+      cluster.addLayer(marker)
       bounds.extend([+lat, +lon])
       if (!groupByLocation.has(name)) groupByLocation.set(name, L.layerGroup())
       groupByLocation.get(name)!.addLayer(marker)
@@ -501,7 +537,7 @@ function rerenderMarkersForActiveTab() {
         { sticky: true, direction: 'top', opacity: 0.95, className: 'flood-tooltip' },
       )
       .on('click', () => { onSelectFloodId(r.flood_id) })
-    markersLayer.addLayer(marker)
+    cluster.addLayer(marker)
     bounds.extend([+lat!, +lon!])
   }
 
@@ -1654,6 +1690,27 @@ onMounted(async () => {
 .leaflet-marker-icon.flood-pin {
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.25));
 }
+
+/* 🔹 Cluster styling */
+.cluster-wrapper {
+  background: transparent;
+}
+.cluster-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: #1d4ed8;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.35);
+  border: 2px solid #bfdbfe;
+}
+.cluster-badge.small { width: 26px; height: 26px; }
+.cluster-badge.md    { width: 32px; height: 32px; }
+.cluster-badge.lg    { width: 38px; height: 38px; }
+.cluster-badge.xl    { width: 46px; height: 46px; }
 
 /* Legend for betweenness (Road Mode) */
 .legend-box {

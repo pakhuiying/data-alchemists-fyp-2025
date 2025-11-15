@@ -6,7 +6,7 @@ import StopDetailsPanel from '@/components/StopDetailsPanel.vue'
 import MapCanvas from '@/components/MapCanvas.vue'
 import TravelTimeBarChart from '@/components/TravelTimeBarChart.vue'
 import { useUrlStateSync } from '@/components/useUrlStateSync'
-import { getBusesAffectedByFloods, getBusRouteByService } from '@/api/api'  
+import { getBusesAffectedByFloods, getBusRouteByService } from '@/api/api'
 
 useUrlStateSync()
 const store = useAppStore()
@@ -16,26 +16,45 @@ const store = useAppStore()
    ───────────────────────────── */
 const activeTab = ref<'itinerary' | 'flood'>('itinerary')
 
-watch(activeTab, (t) => {
-  // only if your store exposes it
-  (store as any).setActiveTab?.(t)
-}, { immediate: true })
+watch(
+  activeTab,
+  (t) => {
+    ;(store as any).setActiveTab?.(t)
+  },
+  { immediate: true }
+)
 
 function setTab(tab: 'itinerary' | 'flood') {
   activeTab.value = tab
 
   if (tab === 'flood') {
-    // show only floods
     store.setLayerVisible('stops', false)
     store.setLayerVisible('floodEvents', true)
   } else {
-    // itinerary: no stops layer; clear any drawn routes/overlays
     store.setLayerVisible('stops', false)
     store.setLayerVisible('floodEvents', false)
     clearFloodUI()
     ;(store as any).serviceRouteOverlay = null
     ;(store as any).clearColoredPolylines?.()
   }
+}
+
+/* ─────────────────────────────
+   FLOOD LAYER TOGGLE (UI + store)
+   ───────────────────────────── */
+if ((store as any).floodLayerEnabled === undefined) {
+  ;(store as any).floodLayerEnabled = true
+}
+
+const floodLayerEnabled = computed<boolean>({
+  get: () => (store as any).floodLayerEnabled !== false,
+  set: (val: boolean) => {
+    ;(store as any).floodLayerEnabled = val
+  },
+})
+
+function toggleFloodLayer() {
+  floodLayerEnabled.value = !floodLayerEnabled.value
 }
 
 /* ─────────────────────────────
@@ -72,7 +91,6 @@ function clearFloodUI() {
 }
 
 async function onFloodClick(payload: { floodId: number }) {
-  // Only respond if we're actually looking at flood tab
   if (activeTab.value !== 'flood') return
 
   selectedFloodId.value = payload.floodId
@@ -102,7 +120,7 @@ async function onFloodClick(payload: { floodId: number }) {
       : []
 
     const names: string[] = raw
-      .map(s => String(s ?? '').trim())
+      .map((s) => String(s ?? '').trim())
       .filter((s): s is string => s.length > 0)
 
     affectedServices.value = Array.from(new Set(names)).sort((a, b) =>
@@ -120,7 +138,6 @@ async function onFloodClick(payload: { floodId: number }) {
   }
 }
 
-/* If something else flips layers externally, keep things sane */
 watch(
   () => activeTab.value,
   (tab) => {
@@ -128,11 +145,10 @@ watch(
   }
 )
 
-/* ========= NEW: helpers to draw a service route when a list item is clicked ========= */
+/* ========= helpers to draw a service route when a list item is clicked ========= */
 const BASE_COLOR = '#2563eb'
 const FLOODED_COLOR = '#dc2626'
 
-// Remove consecutive duplicate points
 function dedupeConsecutive(points: [number, number][]) {
   const out: [number, number][] = []
   let prev: string | null = null
@@ -144,9 +160,8 @@ function dedupeConsecutive(points: [number, number][]) {
   return out
 }
 
-// Build polylines from backend geometry (supports flooded_spans)
 function buildColoredPolylinesFromDirection(d: {
-  coordinates: [number, number][],
+  coordinates: [number, number][]
   flooded_spans?: Array<[number, number]>
 }) {
   const coords = dedupeConsecutive(d.coordinates || [])
@@ -158,13 +173,17 @@ function buildColoredPolylinesFromDirection(d: {
       const hi = Math.min(coords.length - 1, Math.max(a, b))
       for (let i = lo; i <= hi; i++) mask[i] = true
     }
-    const out: Array<{ path:[number,number][], color:string, flooded:boolean }> = []
+    const out: Array<{ path: [number, number][], color: string, flooded: boolean }> = []
     let runStart = 0
     for (let i = 1; i <= coords.length; i++) {
-      if (i === coords.length || mask[i] !== mask[i-1]) {
+      if (i === coords.length || mask[i] !== mask[i - 1]) {
         const seg = coords.slice(runStart, i)
         if (seg.length >= 2) {
-          out.push({ path: seg, color: mask[i-1] ? FLOODED_COLOR : BASE_COLOR, flooded: !!mask[i-1] })
+          out.push({
+            path: seg,
+            color: mask[i - 1] ? FLOODED_COLOR : BASE_COLOR,
+            flooded: !!mask[i - 1],
+          })
         }
         runStart = i
       }
@@ -177,7 +196,10 @@ function buildColoredPolylinesFromDirection(d: {
 /* --- OSRM helpers (road snapping) --- */
 type OsrmRoute = { path: [number, number][], distance_m: number, duration_s: number }
 
-async function osrmRouteVia(pointsLatLon: [number, number][], signal?: AbortSignal): Promise<OsrmRoute | null> {
+async function osrmRouteVia(
+  pointsLatLon: [number, number][],
+  signal?: AbortSignal
+): Promise<OsrmRoute | null> {
   if (!pointsLatLon || pointsLatLon.length < 2) return null
   const coords = pointsLatLon.map(([lat, lon]) => `${lon},${lat}`).join(';')
   const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`
@@ -193,20 +215,26 @@ async function osrmRouteVia(pointsLatLon: [number, number][], signal?: AbortSign
     duration_s: Number(route?.duration ?? 0),
   }
 }
-async function osrmRouteViaChunked(points: [number,number][], chunkSize = 90, signal?: AbortSignal): Promise<OsrmRoute | null> {
+
+async function osrmRouteViaChunked(
+  points: [number, number][],
+  chunkSize = 90,
+  signal?: AbortSignal
+): Promise<OsrmRoute | null> {
   if (points.length <= chunkSize) return await osrmRouteVia(points, signal)
   const pieces: OsrmRoute[] = []
-  for (let i = 0; i < points.length - 1; i += (chunkSize - 1)) {
+  for (let i = 0; i < points.length - 1; i += chunkSize - 1) {
     const slice = points.slice(i, Math.min(points.length, i + chunkSize))
     if (slice.length >= 2) {
       const seg = await osrmRouteVia(slice, signal)
       if (seg && seg.path.length) pieces.push(seg)
     }
-    await new Promise(r => setTimeout(r, 40))
+    await new Promise((r) => setTimeout(r, 40))
   }
   if (!pieces.length) return null
-  const joined: [number,number][] = []
-  let dist = 0, dura = 0
+  const joined: [number, number][] = []
+  let dist = 0,
+    dura = 0
   for (let i = 0; i < pieces.length; i++) {
     const seg = pieces[i]
     if (!seg?.path?.length) continue
@@ -223,16 +251,15 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
   try {
     const resp = await getBusRouteByService(serviceNo)
 
-    // Start from backend geometry
     const directions = (resp?.directions || []).map((d: any) => {
       const points = dedupeConsecutive(d.coordinates || [])
-      const polylines = buildColoredPolylinesFromDirection(d) // initial (may be off-road)
+      const polylines = buildColoredPolylinesFromDirection(d)
       return {
         dir: Number(d.direction ?? 1),
         points,
         stopCodes: [],
-        roadPath: points,          // temp; will replace after OSRM
-        polylines,                 // temp; will replace after OSRM
+        roadPath: points,
+        polylines,
         flooded_spans: d.flooded_spans,
       }
     })
@@ -242,36 +269,34 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
       return
     }
 
-    // Snap each direction to roads via OSRM
-    await Promise.all(directions.map(async (d: any) => {
-      if (!Array.isArray(d.points) || d.points.length < 2) return
-      const estimatedLen = d.points.length * 24
-      const useChunked = estimatedLen > 7000
-      const res = useChunked
-        ? await osrmRouteViaChunked(d.points, 90)
-        : await osrmRouteVia(d.points).catch(() => osrmRouteViaChunked(d.points, 90))
+    await Promise.all(
+      directions.map(async (d: any) => {
+        if (!Array.isArray(d.points) || d.points.length < 2) return
+        const estimatedLen = d.points.length * 24
+        const useChunked = estimatedLen > 7000
+        const res = useChunked
+          ? await osrmRouteViaChunked(d.points, 90)
+          : await osrmRouteVia(d.points).catch(() => osrmRouteViaChunked(d.points, 90))
 
-      if (res && res.path.length >= 2) {
-        d.roadPath   = res.path
-        // draw the snapped road path; if you want flood coloring on the snapped path,
-        // keep it simple for now and color all blue (or add a proportional remap later).
-        d.polylines  = [{ path: res.path, color: BASE_COLOR, flooded: false }]
-        d.distance_m = res.distance_m
-        d.duration_s = res.duration_s
-      }
-    }))
+        if (res && res.path.length >= 2) {
+          d.roadPath = res.path
+          d.polylines = [{ path: res.path, color: BASE_COLOR, flooded: false }]
+          d.distance_m = res.distance_m
+          d.duration_s = res.duration_s
+        }
+      })
+    )
 
-    // push to map
     store.setServiceRouteOverlay?.({
       serviceNo: String(resp?.service ?? serviceNo),
-      directions: directions.map((d:any) => ({
+      directions: directions.map((d: any) => ({
         dir: d.dir,
         points: d.points,
         stopCodes: d.stopCodes,
         roadPath: d.roadPath,
         duration_s: d.duration_s,
-        distance_m: d.distance_m
-      }))
+        distance_m: d.distance_m,
+      })),
     })
 
     ;(store as any).setColoredPolylines?.(
@@ -292,10 +317,8 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
   >
     <!-- Main grid -->
     <div class="h-[calc(100vh-2rem)] grid grid-cols-12 gap-5">
-
       <!-- LEFT SIDEBAR -->
       <aside class="col-span-3 flex flex-col gap-5 min-h-0">
-
         <!-- Header / Branding Card -->
         <div
           class="rounded-2xl border border-[#007b3a]/20 bg-white/80 shadow-sm backdrop-blur-sm px-4 py-3 flex items-start gap-3"
@@ -317,18 +340,19 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
           </div>
         </div>
 
-        <!-- TAB SWITCHER (Itinerary / Flood only) -->
+        <!-- TAB SWITCHER -->
         <div
           class="rounded-2xl shadow-inner bg-gradient-to-r from-[#007b3a]/10 to-[#00b36b]/10 border border-[#007b3a]/20 p-3"
         >
           <div class="grid grid-cols-2 gap-2 text-[13px] font-semibold">
-
             <!-- Itinerary -->
             <button
               class="py-2 rounded-lg transition-all duration-200 leading-snug text-center"
-              :class="activeTab === 'itinerary'
-                ? 'bg-[#6a1b9a] text-white shadow-md shadow-[#6a1b9a]/30'
-                : 'bg-white text-[#6a1b9a] border border-[#6a1b9a]/30 hover:bg-[#faf5ff]'"
+              :class="
+                activeTab === 'itinerary'
+                  ? 'bg-[#6a1b9a] text-white shadow-md shadow-[#6a1b9a]/30'
+                  : 'bg-white text-[#6a1b9a] border border-[#6a1b9a]/30 hover:bg-[#faf5ff]'
+              "
               @click="setTab('itinerary')"
             >
               <div class="flex flex-col">
@@ -342,9 +366,11 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
             <!-- Flood Impact -->
             <button
               class="py-2 rounded-lg transition-all duration-200 leading-snug text-center"
-              :class="activeTab === 'flood'
-                ? 'bg-[#c62828] text-white shadow-md shadow-[#c62828]/30'
-                : 'bg-white text-[#c62828] border border-[#c62828]/30 hover:bg-[#fff5f5]'"
+              :class="
+                activeTab === 'flood'
+                  ? 'bg-[#c62828] text-white shadow-md shadow-[#c62828]/30'
+                  : 'bg-white text-[#c62828] border border-[#c62828]/30 hover:bg-[#fff5f5]'
+              "
               @click="setTab('flood')"
             >
               <div class="flex flex-col">
@@ -365,7 +391,9 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
           <!-- ITINERARY TAB -->
           <template v-if="activeTab === 'itinerary'">
             <div class="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-3">
-              <span class="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#6a1b9a] text-white text-xs font-bold shadow">
+              <span
+                class="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#6a1b9a] text-white text-xs font-bold shadow"
+              >
                 1
               </span>
               <span>Compare itineraries</span>
@@ -381,7 +409,9 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
           <!-- FLOOD TAB -->
           <template v-else>
             <div class="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-3">
-              <span class="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#c62828] text-white text-xs font-bold shadow">
+              <span
+                class="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#c62828] text-white text-xs font-bold shadow"
+              >
                 !
               </span>
               <span>Flood impact near bus stops</span>
@@ -415,16 +445,13 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
                 No affected bus services reported for this location.
               </div>
 
-              <ul
-                v-else
-                class="space-y-1 max-h-40 overflow-y-auto pr-1"
-              >
+              <ul v-else class="space-y-1 max-h-40 overflow-y-auto pr-1">
                 <li
                   v-for="svc in affectedServices"
                   :key="svc"
                   class="px-3 py-2 border border-[#007b3a]/20 rounded-lg text-[13px] bg-[#f9fff9] flex items-center justify-between
                          hover:bg-[#eefcf2] cursor-pointer transition-colors"
-                  @click="drawServiceRouteFromBackend(svc)"   
+                  @click="drawServiceRouteFromBackend(svc)"
                   title="Show this service route on the map"
                 >
                   <div class="font-semibold text-[#007b3a] flex items-center gap-2">
@@ -451,10 +478,8 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
                 </li>
               </ul>
             </div>
-
           </template>
         </div>
-
       </aside>
 
       <!-- RIGHT: CHART + MAP -->
@@ -484,19 +509,18 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
               </div>
             </div>
 
-            <TravelTimeBarChart
-              :entry="chartEntry"
-              title="Travel Time Scenarios"
-            />
+            <TravelTimeBarChart :entry="chartEntry" title="Travel Time Scenarios" />
           </div>
 
           <!-- MAP CARD -->
           <div
             class="flex-1 min-h-0 overflow-hidden rounded-xl border-2 border-[#007b3a]/20 shadow-inner bg-white relative"
           >
-            <!-- subtle top label bar -->
+            <!-- top label bar -->
             <div
-              class="absolute left-0 right-0 top-0 z-[5] flex items-center justify-between text-[11px] text-gray-700 bg-gradient-to-r from-white/80 via-[#f0fff5]/80 to-white/80 px-3 py-2 border-b border-[#007b3a]/20"
+              class="absolute left-0 right-0 top-0 z-[5] flex items-center justify-between
+                     text-[11px] text-gray-700 bg-gradient-to-r from-white/80 via-[#f0fff5]/80 to-white/80
+                     px-3 py-2 border-b border-[#007b3a]/20"
             >
               <span class="flex items-center gap-2 font-medium text-[#007b3a]">
                 <span
@@ -506,9 +530,39 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
                 </span>
                 <span>Singapore Bus & Flood View</span>
               </span>
-              <span class="text-gray-400">
-                Click a stop or flood marker for details
-              </span>
+
+              <div class="flex items-center gap-3">
+                <span class="hidden sm:inline text-gray-400">
+                  Click a stop or flood marker for details
+                </span>
+
+                <!-- Flood layer toggle (compact, like 2nd image) -->
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5
+                         text-[10px] sm:text-[11px] font-medium bg-white
+                         transition-all duration-150"
+                  :class="
+                    floodLayerEnabled
+                      ? 'border-[#c62828]/60 text-[#c62828]'
+                      : 'border-gray-300 text-gray-500 hover:bg-gray-50'
+                  "
+                  @click="toggleFloodLayer"
+                >
+                  <span class="text-[12px]">🌧️</span>
+                  <span>Flood layer</span>
+
+                  <span
+                    class="relative inline-flex h-4 w-7 items-center rounded-full transition-colors"
+                    :class="floodLayerEnabled ? 'bg-[#c62828]' : 'bg-gray-300'"
+                  >
+                    <span
+                      class="h-3 w-3 rounded-full bg-white shadow transform transition-transform duration-150"
+                      :class="floodLayerEnabled ? 'translate-x-3' : 'translate-x-0'"
+                    ></span>
+                  </span>
+                </button>
+              </div>
             </div>
 
             <!-- actual map -->

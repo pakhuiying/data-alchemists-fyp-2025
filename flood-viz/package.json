@@ -12,6 +12,7 @@
     "axios": "^1.12.2",
     "chart.js": "^4.5.0",
     "leaflet": "^1.9.4",
+    "leaflet.markercluster": "^1.5.3",
     "pinia": "^3.0.3",
     "proj4": "^2.19.10",
     "vue": "^3.5.18",
@@ -21,6 +22,7 @@
   "devDependencies": {
     "@types/geojson": "^7946.0.16",
     "@types/leaflet": "^1.9.20",
+    "@types/leaflet.markercluster": "^1.5.6",
     "@types/node": "^24.3.0",
     "@vitejs/plugin-vue": "^6.0.1",
     "@vue/tsconfig": "^0.7.0",

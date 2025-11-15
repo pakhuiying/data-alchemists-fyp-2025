@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, watch, ref } from 'vue'
 import * as L from 'leaflet'
+import 'leaflet.markercluster' // ← NEW
 import { useAppStore } from '@/store/app'
 import { getAllFloodEvents, getFloodEventById } from '@/api/api'
 
@@ -12,12 +13,19 @@ let map: L.Map
 
 /* Layers (no bus stops layer anymore) */
 let floodEventsLayer: L.LayerGroup | null = null
+let floodCluster: L.MarkerClusterGroup | null = null
 let roadSegmentLayer: L.LayerGroup | null = null
 let busRouteLayer: L.LayerGroup | null = null
 let serviceRouteLayer: L.LayerGroup | null = null
 let driveRouteLayer: L.LayerGroup | null = null
 
 const store = useAppStore()
+
+/** 🔘 Default flood layer toggle (if not set in store yet) */
+if ((store as any).floodLayerEnabled === undefined) {
+  (store as any).floodLayerEnabled = true
+}
+const isFloodLayerOn = () => (store as any).floodLayerEnabled !== false
 
 /* ================= Flood hover: cache + single-owner tooltip ================= */
 const floodDetailCache = new Map<number, any>()
@@ -199,8 +207,18 @@ function ensureMap() {
 
 /* Clearers */
 function clearFloodOverlays() {
-  if (floodEventsLayer) { map.removeLayer(floodEventsLayer); floodEventsLayer = null }
-  if (roadSegmentLayer) { map.removeLayer(roadSegmentLayer); roadSegmentLayer = null }
+  if (floodCluster) {            // ← NEW
+    map.removeLayer(floodCluster)
+    floodCluster = null
+  }
+  if (floodEventsLayer) {
+    map.removeLayer(floodEventsLayer)
+    floodEventsLayer = null
+  }
+  if (roadSegmentLayer) {
+    map.removeLayer(roadSegmentLayer)
+    roadSegmentLayer = null
+  }
   map?.closePopup?.()
 }
 function clearAllRouteOverlays() {
@@ -307,24 +325,77 @@ function pickFloodFields(e: any) {
 /* ===================================================================== */
 let renderEpoch = 0
 
+/* -------- cluster helpers -------- */
+function ensureFloodCluster(): L.MarkerClusterGroup {
+  if (!map) {
+    throw new Error('Map not ready')
+  }
+
+  if (!floodCluster) {
+    floodCluster = L.markerClusterGroup({
+      chunkedLoading: true,
+      maxClusterRadius: 60,
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+      disableClusteringAtZoom: 16,
+      iconCreateFunction: (cluster) => {
+        const count = cluster.getChildCount()
+        let size = 'small'
+        if (count >= 50) size = 'xl'
+        else if (count >= 20) size = 'lg'
+        else if (count >= 10) size = 'md'
+
+        return L.divIcon({
+          html: `<div class="cluster-badge ${size}">${count}</div>`,
+          className: 'cluster-wrapper',
+          iconSize: [40, 40],
+        })
+      },
+    }).addTo(map) as L.MarkerClusterGroup
+  }
+
+  return floodCluster
+}
+
+/* ========== RENDER FLOODS WITH CLUSTERS ========== */
+/* ========== RENDER FLOODS WITH CLUSTERS ========== */
 async function renderFloodEvents(epoch: number) {
   // clear current
-  if (floodEventsLayer) { map.removeLayer(floodEventsLayer); floodEventsLayer = null }
+  if (floodCluster) {
+    map.removeLayer(floodCluster)
+    floodCluster = null
+  }
+  if (floodEventsLayer) {
+    map.removeLayer(floodEventsLayer)
+    floodEventsLayer = null
+  }
 
   const events = await getAllFloodEvents()
   if (epoch !== renderEpoch) return
 
-  const group = L.layerGroup()
+  const cluster = ensureFloodCluster()   
+
+  const group = L.layerGroup() // for any non-point extras if needed
 
   for (const ev of events as any[]) {
     const picked = pickFloodFields(ev)
     if (!picked.id) continue
 
-    // GeoJSON flood shapes
+    // GeoJSON flood shapes (added directly; they won't cluster but sit with the rest)
     if (picked.hasGeometry && picked.geometry) {
-      const feature = { type: 'Feature', geometry: picked.geometry, properties: { id: picked.id, name: picked.name } }
+      const feature = {
+        type: 'Feature',
+        geometry: picked.geometry,
+        properties: { id: picked.id, name: picked.name }
+      }
       const geo = L.geoJSON(feature as any, {
-        style: (): L.PathOptions => ({ color: '#ef4444', weight: 3, opacity: 0.9, fillOpacity: 0.25, pane: 'pane-flooded' }),
+        style: (): L.PathOptions => ({
+          color: '#ef4444',
+          weight: 3,
+          opacity: 0.9,
+          fillOpacity: 0.25,
+          pane: 'pane-flooded'
+        }),
       })
 
       geo.eachLayer((child: any) => {
@@ -354,14 +425,19 @@ async function renderFloodEvents(epoch: number) {
         }
       })
 
-      group.addLayer(geo)
+      cluster.addLayer(geo)   
       continue
     }
 
-    // Point fallback
+    // Point fallback → clustered circleMarker
     if (!Number.isFinite(picked.lat!) || !Number.isFinite(picked.lon!)) continue
     const marker = L.circleMarker([picked.lat!, picked.lon!], {
-      radius: 6, color: '#ef4444', weight: 2, fillColor: '#fca5a5', fillOpacity: 0.9, pane: 'pane-flooded'
+      radius: 6,
+      color: '#2563eb',
+      weight: 2,
+      fillColor: '#60a5fa',
+      fillOpacity: 0.9,
+      pane: 'pane-flooded'
     }).bindTooltip('<div class="flood-tt">Loading…</div>', {
       sticky: true, direction: 'top', opacity: 0.95, className: 'flood-tooltip'
     })
@@ -387,11 +463,8 @@ async function renderFloodEvents(epoch: number) {
       }
     })
 
-    group.addLayer(marker)
+    cluster.addLayer(marker)   
   }
-
-  if (epoch !== renderEpoch) return
-  floodEventsLayer = group.addTo(map)
 }
 
 /* -------------------- Route endpoints -------------------- */
@@ -434,14 +507,14 @@ async function renderLayers() {
   ensureMap()
   const epoch = ++renderEpoch
 
-  if (store.activeTab === 'flood') {
-    // entering Flood view: clear other overlays + chart, then render floods
+  if (store.activeTab === 'flood' && isFloodLayerOn()) {
+    // entering Flood view & toggle is ON: clear other overlays + chart, then render floods
     clearAllRouteOverlays()
     ;(store as any).serviceRouteOverlay = null
     ;(store as any).showTravelTimeChart = false
     await renderFloodEvents(epoch)
   } else {
-    // other tabs: remove flood polygons/segments
+    // either not in Flood tab OR toggle is OFF → hide floods
     clearFloodOverlays()
   }
 }
@@ -461,6 +534,19 @@ watch(() => (store as any).activeTab as UITab | undefined, (tab) => {
   }
   renderLayers()
 })
+
+/** 🔘 Watch the flood layer toggle */
+watch(
+  () => (store as any).floodLayerEnabled,
+  (enabled) => {
+    if (store.activeTab !== 'flood') return
+    if (enabled === false) {
+      clearFloodOverlays()
+    } else {
+      renderLayers()
+    }
+  }
+)
 
 /* ======= Optional overlays still supported (origin/dest, trips, etc.) ======= */
 let originMarker: L.Layer | null = null
@@ -588,6 +674,27 @@ watch(() => (store as any).serviceRouteOverlay, (o) => {
 .ep .pulse { position: absolute; left: 8px; top: 8px; width: 16px; height: 16px; border-radius: 999px; background: currentColor; opacity: .25; animation: ep-pulse 1.8s ease-out infinite; transform: scale(1); filter: blur(2px); }
 .ep.start { color: #3b82f6; } .ep.end { color: #22c55e; }
 @keyframes ep-pulse { 0% { opacity: .35; transform: scale(1); } 60% { opacity: .10; transform: scale(2.3); } 100% { opacity: 0; transform: scale(2.8); } }
+
+/* CLUSTER STYLING */
+.cluster-wrapper {
+  background: transparent;
+}
+.cluster-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: #1d4ed8;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  box-shadow: 0 4px 12px rgba(15,23,42,.35);
+  border: 2px solid #bfdbfe;
+}
+.cluster-badge.small { width: 26px; height: 26px; }
+.cluster-badge.md    { width: 32px; height: 32px; }
+.cluster-badge.lg    { width: 38px; height: 38px; }
+.cluster-badge.xl    { width: 46px; height: 46px; }
 </style>
 
 <style scoped>
