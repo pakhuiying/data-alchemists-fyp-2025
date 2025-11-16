@@ -314,7 +314,7 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
 <template>
   <!-- PAGE WRAPPER -->
   <div
-    class="min-h-screen w-full bg-gradient-to-br from-[#eaf4ef] via-[#f8fafc] to-[#f4f9f6] text-gray-800 p-4"
+    class="min-h-screen w-full bg-gradient-to-br from-[#e0f2fe] via-[#eff6ff] to-[#dbeafe] text-slate-800 p-4"
   >
     <!-- Main grid -->
     <div class="h-[calc(100vh-2rem)] grid grid-cols-12 gap-5">
@@ -322,20 +322,20 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
       <aside class="col-span-3 flex flex-col gap-5 min-h-0">
         <!-- Header / Branding Card -->
         <div
-          class="rounded-2xl border border-[#007b3a]/20 bg-white/80 shadow-sm backdrop-blur-sm px-4 py-3 flex items-start gap-3"
+          class="rounded-2xl border border-[#1d4ed8]/20 bg-white/80 shadow-sm backdrop-blur-sm px-4 py-3 flex items-start gap-3"
         >
           <div
-            class="h-10 w-10 flex items-center justify-center rounded-xl bg-[#007b3a] text-white font-bold text-sm shadow-md"
+            class="h-10 w-10 flex items-center justify-center rounded-xl bg-[#1d4ed8] text-white font-bold text-sm shadow-md"
             title="Public Transport Flood Impact Dashboard"
           >
             🚍
           </div>
 
           <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold text-gray-900 leading-tight">
+            <div class="text-sm font-semibold text-slate-900 leading-tight">
               Flood-Viz Transit
             </div>
-            <div class="text-[11px] text-gray-500 leading-snug">
+            <div class="text-[11px] text-slate-500 leading-snug">
               Bus availability & flood impact around Singapore
             </div>
           </div>
@@ -343,7 +343,7 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
 
         <!-- TAB SWITCHER -->
         <div
-          class="rounded-2xl shadow-inner bg-gradient-to-r from-[#007b3a]/10 to-[#00b36b]/10 border border-[#007b3a]/20 p-3"
+          class="rounded-2xl shadow-inner bg-gradient-to-r from-[#1d4ed8]/10 to-[#6366f1]/10 border border-[#1d4ed8]/20 p-3"
         >
           <div class="grid grid-cols-2 gap-2 text-[13px] font-semibold">
             <!-- Itinerary -->
@@ -351,8 +351,8 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
               class="py-2 rounded-lg transition-all duration-200 leading-snug text-center"
               :class="
                 activeTab === 'itinerary'
-                  ? 'bg-[#6a1b9a] text-white shadow-md shadow-[#6a1b9a]/30'
-                  : 'bg-white text-[#6a1b9a] border border-[#6a1b9a]/30 hover:bg-[#faf5ff]'
+                  ? 'bg-[#6d28d9] text-white shadow-md shadow-[#6d28d9]/30'
+                  : 'bg-white text-[#6d28d9] border border-[#6d28d9]/30 hover:bg-[#f5f3ff]'
               "
               @click="setTab('itinerary')"
             >
@@ -367,8 +367,8 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
               class="py-2 rounded-lg transition-all duration-200 leading-snug text-center"
               :class="
                 activeTab === 'flood'
-                  ? 'bg-[#c62828] text-white shadow-md shadow-[#c62828]/30'
-                  : 'bg-white text-[#c62828] border border-[#c62828]/30 hover:bg-[#fff5f5]'
+                  ? 'bg-[#dc2626] text-white shadow-md shadow-[#dc2626]/30'
+                  : 'bg-white text-[#dc2626] border border-[#dc2626]/30 hover:bg-[#fef2f2]'
               "
               @click="setTab('flood')"
             >
@@ -382,13 +382,13 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
 
         <!-- PANEL UNDER TABS -->
         <div
-          class="rounded-2xl border border-gray-200/70 bg-white/90 shadow-sm backdrop-blur-sm px-4 py-4 min-h-[240px] flex flex-col"
+          class="rounded-2xl border border-slate-200/70 bg-white/90 shadow-sm backdrop-blur-sm px-4 py-4 min-h-[240px] flex flex-col"
         >
           <!-- ITINERARY TAB -->
           <template v-if="activeTab === 'itinerary'">
-            <div class="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-3">
+            <div class="flex items-center gap-2 text-sm font-semibold text-slate-800 mb-3">
               <span
-                class="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#6a1b9a] text-white text-xs font-bold shadow"
+                class="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#6d28d9] text-white text-xs font-bold shadow"
               >
                 1
               </span>
@@ -397,16 +397,16 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
 
             <StopDetailsPanel mode="itinerary" />
 
-            <p class="text-[11px] text-gray-500 mt-4 leading-snug">
+            <p class="text-[11px] text-slate-500 mt-4 leading-snug">
               We’ll consider transfers, wait time and walking to suggest the smoothest journey.
             </p>
           </template>
 
           <!-- FLOOD TAB -->
           <template v-else>
-            <div class="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-3">
+            <div class="flex items-center gap-2 text-sm font-semibold text-slate-800 mb-3">
               <span
-                class="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#c62828] text-white text-xs font-bold shadow"
+                class="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#dc2626] text-white text-xs font-bold shadow"
               >
                 !
               </span>
@@ -414,19 +414,19 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
             </div>
 
             <!-- instructions -->
-            <div v-if="!selectedFloodId" class="text-[12px] text-gray-600 leading-snug mb-3">
-              Click a <span class="font-medium text-[#c62828]">flood marker</span> on the map
+            <div v-if="!selectedFloodId" class="text-[12px] text-slate-600 leading-snug mb-3">
+              Click a <span class="font-medium text-[#dc2626]">flood marker</span> on the map
               to list bus services affected.
             </div>
 
             <!-- details -->
             <div v-else class="space-y-2">
-              <div class="text-[12px] text-gray-500 leading-snug">
+              <div class="text-[12px] text-slate-500 leading-snug">
                 Flood ID:
-                <span class="font-medium text-gray-800">{{ selectedFloodId }}</span>
+                <span class="font-medium text-slate-800">{{ selectedFloodId }}</span>
               </div>
 
-              <div v-if="loadingAffected" class="text-[12px] text-gray-700 animate-pulse">
+              <div v-if="loadingAffected" class="text-[12px] text-slate-700 animate-pulse">
                 Checking nearby routes…
               </div>
 
@@ -436,7 +436,7 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
 
               <div
                 v-else-if="!affectedServices.length"
-                class="text-[12px] text-gray-600 leading-snug"
+                class="text-[12px] text-slate-600 leading-snug"
               >
                 No affected bus services reported for this location.
               </div>
@@ -445,14 +445,14 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
                 <li
                   v-for="svc in affectedServices"
                   :key="svc"
-                  class="px-3 py-2 border border-[#007b3a]/20 rounded-lg text-[13px] bg-[#f9fff9] flex items-center justify-between
-                         hover:bg-[#eefcf2] cursor-pointer transition-colors"
+                  class="px-3 py-2 border border-[#1d4ed8]/20 rounded-lg text-[13px] bg-[#eff6ff] flex items-center justify-between
+                         hover:bg-[#dbeafe] cursor-pointer transition-colors"
                   @click="drawServiceRouteFromBackend(svc)"
                   title="Show this service route on the map"
                 >
-                  <div class="font-semibold text-[#007b3a] flex items-center gap-2">
+                  <div class="font-semibold text-[#1d4ed8] flex items-center gap-2">
                     <span
-                      class="inline-flex items-center justify-center text-[11px] font-bold leading-none text-white bg-[#007b3a] rounded px-2 py-1 shadow-sm"
+                      class="inline-flex items-center justify-center text-[11px] font-bold leading-none text-white bg-[#1d4ed8] rounded px-2 py-1 shadow-sm"
                     >
                       BUS
                     </span>
@@ -460,7 +460,7 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
                   </div>
 
                   <svg
-                    class="h-4 w-4 text-gray-400"
+                    class="h-4 w-4 text-slate-400"
                     viewBox="0 0 20 20"
                     fill="currentColor"
                     aria-hidden="true"
@@ -481,26 +481,26 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
       <!-- RIGHT: CHART + MAP -->
       <section class="col-span-9 min-h-0 flex flex-col">
         <div
-          class="flex-1 rounded-2xl border border-gray-200/70 bg-white/80 shadow-sm backdrop-blur-sm p-4 flex flex-col min-h-0"
+          class="flex-1 rounded-2xl border border-slate-200/70 bg-white/80 shadow-sm backdrop-blur-sm p-4 flex flex-col min-h-0"
         >
           <!-- CHART CARD -->
-          <div v-if="chartEntry" class="mb-4 rounded-xl border border-gray-200 bg-white shadow-sm p-4">
+          <div v-if="chartEntry" class="mb-4 rounded-xl border border-slate-200 bg-white shadow-sm p-4">
             <div class="flex items-start justify-between flex-wrap gap-2 mb-3">
               <div>
-                <div class="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                <div class="text-sm font-semibold text-slate-800 flex items-center gap-2">
                   <span
-                    class="inline-flex items-center justify-center rounded bg-[#004b87] text-white text-[10px] font-bold leading-none h-5 px-2 shadow"
+                    class="inline-flex items-center justify-center rounded bg-[#1d4ed8] text-white text-[10px] font-bold leading-none h-5 px-2 shadow"
                   >
                     ETA
                   </span>
                   <span>Travel Time Scenarios</span>
                 </div>
-                <div class="text-[11px] text-gray-500 leading-snug mt-1">
+                <div class="text-[11px] text-slate-500 leading-snug mt-1">
                   Baseline vs flood slowdown along suggested route
                 </div>
               </div>
 
-              <div class="text-[10px] text-gray-400 leading-tight max-w-[180px]">
+              <div class="text-[10px] text-slate-400 leading-tight max-w-[180px]">
                 Values are modelled. Actual road closure / bus diversion may differ.
               </div>
             </div>
@@ -510,17 +510,17 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
 
           <!-- MAP CARD -->
           <div
-            class="flex-1 min-h-0 overflow-hidden rounded-xl border-2 border-[#007b3a]/20 shadow-inner bg-white relative"
+            class="flex-1 min-h-0 overflow-hidden rounded-xl border-2 border-[#1d4ed8]/25 shadow-inner bg-white relative"
           >
             <!-- top label bar -->
             <div
               class="absolute left-0 right-0 top-0 z-[5] flex items-center justify-between
-                     text-[11px] text-gray-700 bg-gradient-to-r from-white/80 via-[#f0fff5]/80 to-white/80
-                     px-3 py-2 border-b border-[#007b3a]/20"
+                     text-[11px] text-slate-700 bg-gradient-to-r from-white/80 via-[#e0f2fe]/80 to-white/80
+                     px-3 py-2 border-b border-[#bfdbfe]"
             >
-              <span class="flex items-center gap-2 font-medium text-[#007b3a]">
+              <span class="flex items-center gap-2 font-medium text-[#1d4ed8]">
                 <span
-                  class="inline-flex items-center justify-center rounded bg-[#007b3a] text-white text-[10px] font-bold leading-none h-5 px-2 shadow-sm"
+                  class="inline-flex items-center justify-center rounded bg-[#1d4ed8] text-white text-[10px] font-bold leading-none h-5 px-2 shadow-sm"
                 >
                   MAP
                 </span>
@@ -528,7 +528,7 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
               </span>
 
               <div class="flex items-center gap-3">
-                <span class="hidden sm:inline text-gray-400">
+                <span class="hidden sm:inline text-slate-400">
                   Click a stop or flood marker for details
                 </span>
 
@@ -540,8 +540,8 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
                          transition-all duration-150"
                   :class="
                     floodLayerEnabled
-                      ? 'border-[#c62828]/60 text-[#c62828]'
-                      : 'border-gray-300 text-gray-500 hover:bg-gray-50'
+                      ? 'border-[#dc2626]/60 text-[#dc2626]'
+                      : 'border-slate-300 text-slate-500 hover:bg-slate-50'
                   "
                   @click="toggleFloodLayer"
                 >
@@ -550,7 +550,7 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
 
                   <span
                     class="relative inline-flex h-4 w-7 items-center rounded-full transition-colors"
-                    :class="floodLayerEnabled ? 'bg-[#c62828]' : 'bg-gray-300'"
+                    :class="floodLayerEnabled ? 'bg-[#dc2626]' : 'bg-slate-300'"
                   >
                     <span
                       class="h-3 w-3 rounded-full bg-white shadow transform transition-transform duration-150"
@@ -574,3 +574,4 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
     <TransportModeToggle />
   </div>
 </template>
+
