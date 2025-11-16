@@ -7,7 +7,7 @@ import AddressDetailsPanel from '@/components/AddressDetailsPanel.vue'
 import { getOnemapCarRoute } from '@/api/api'
 
 
-const USE_MOCK = true
+const USE_MOCK = false
 
 const MOCK_ROUTE_RESPONSE: any = {
   detour_comparison: {
