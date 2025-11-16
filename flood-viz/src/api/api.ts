@@ -23,7 +23,8 @@ const PATHS = {
   criticality: '/traffic/criticality',     // GET ?metric=
   busImpacts: '/bus/impacts',              // GET ?scenario=
   summary: '/traffic/summary',             // GET ?mode=&scenario=
-  onemapRoute: '/onemap_car_route',            // GET ?start_address=&end_address=&date=&time=
+  //onemapRoute: '/onemap_car_route',            // GET ?start_address=&end_address=&date=&time=
+  onemapRoute: '/car_route',
   getRoute: '/get_route',                  // NEW: OneMap PT routing via your backend
   getBusesAffected: '/get_buses_affected_by_floods', // GET ?flood_id=
 
