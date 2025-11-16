@@ -8,7 +8,7 @@ const navItems = [
   { name: 'About', path: '/about' },
   { name: 'Public Transport', path: '/PublicTransport' },
   { name: 'Private Transport', path: '/PrivateTransport' },
-  { name: 'Flood', path: '/Flood' },
+  { name: 'Flood Vulnerabilities', path: '/Flood' },
   // { name: 'Critical Roads', path: '/CriticalRoad'},
 ]
 
