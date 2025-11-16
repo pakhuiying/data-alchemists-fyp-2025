@@ -355,12 +355,10 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
               "
               @click="setTab('itinerary')"
             >
-              <div class="flex flex-col">
-                <span class="flex items-center justify-center gap-1">
-                  <span class="text-[14px]">🧭</span>
-                  <span>Itinerary</span>
-                </span>
-              </div>
+              <span class="flex items-center justify-center gap-2">
+                <span class="text-[14px]">🧭</span>
+                <span>Bus Route Options</span>
+              </span>
             </button>
 
             <!-- Flood Impact -->
@@ -373,13 +371,10 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
               "
               @click="setTab('flood')"
             >
-              <div class="flex flex-col">
-                <span class="flex items-center justify-center gap-1">
-                  <span class="text-[14px]">🌧️</span>
-                  <span>Affected</span>
-                </span>
-                <span class="-mt-0.5">Buses</span>
-              </div>
+              <span class="flex items-center justify-center gap-2">
+                <span class="text-[14px]">🌧️</span>
+                <span>Affected Bus Services</span>
+              </span>
             </button>
           </div>
         </div>
@@ -396,7 +391,7 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
               >
                 1
               </span>
-              <span>Compare itineraries</span>
+              <span>Compare Route Options</span>
             </div>
 
             <StopDetailsPanel mode="itinerary" />
@@ -575,3 +570,4 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
     </div>
   </div>
 </template>
+

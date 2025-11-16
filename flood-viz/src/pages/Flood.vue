@@ -1232,9 +1232,6 @@ onMounted(async () => {
                 </span>
                 <span>Locations</span>
               </div>
-              <div class="text-[11px] text-gray-500 leading-snug">
-                Click a row to draw flooded segments
-              </div>
             </div>
 
             <div v-if="loadingLocations" class="text-gray-500 text-sm">Loading…</div>
@@ -1283,29 +1280,33 @@ onMounted(async () => {
           class="flex flex-col gap-4 min-h-0 overflow-y-auto pr-1"
         >
           <!-- SUB-TABS: FLOOD / ROAD -->
-          <div class="rounded-2xl border border-red-200 bg-white/90 shadow-sm backdrop-blur-sm p-4">
+          <div class="rounded-2xl border border-teal-200 bg-white/90 shadow-sm backdrop-blur-sm p-4">
             <div class="text-[12px] font-medium text-gray-700 mb-3 flex items-center gap-2">
-              <span class="inline-flex items-center justify-center rounded bg-[#dc2626] text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
+              <span class="inline-flex items-center justify-center rounded bg-teal-600 text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
                 🚧
               </span>
               <span>Critical Road Segments</span>
             </div>
 
-            <div class="rounded-xl bg-red-50/60 border border-red-200 p-1 text-[13px] font-semibold shadow-inner flex gap-2">
+            <!-- GIS flood colour (teal) + road colourway (black/yellow) -->
+            <div class="rounded-xl bg-teal-50/70 border border-teal-200 p-1 text-[13px] font-semibold shadow-inner flex gap-2">
+              <!-- Flood Mode tab (GIS teal) -->
               <button
                 class="flex-1 py-2 rounded-lg transition-all duration-200 text-center leading-snug"
                 :class="activeCriticalMode === 'flood'
-                  ? 'bg-[#dc2626] text-white shadow-md shadow-[#dc2626]/30'
-                  : 'bg-white text-[#dc2626] border border-[#dc2626]/30 hover:bg-red-50'"
+                  ? 'bg-[#0d9488] text-white shadow-md shadow-[#0d9488]/40'
+                  : 'bg-white text-[#0f766e] border border-[#5eead4]/70 hover:bg-teal-50'"
                 @click="activeCriticalMode = 'flood'"
               >
                 Flood Mode
               </button>
+
+              <!-- Road Criticality Mode tab (black + yellow) -->
               <button
                 class="flex-1 py-2 rounded-lg transition-all duration-200 text-center leading-snug"
                 :class="activeCriticalMode === 'road'
-                  ? 'bg-sky-700 text-white shadow-md shadow-sky-700/30'
-                  : 'bg-white text-sky-700 border border-sky-400/30 hover:bg-sky-50'"
+                  ? 'bg-[#111111] text-[#ffeb3b] shadow-md shadow-[#facc15]/40'
+                  : 'bg-white text-[#1f2937] border border-[#facc15] hover:bg-[#fffbea]'"
                 @click="activeCriticalMode = 'road'"
               >
                 Road Criticality Mode
@@ -1315,9 +1316,9 @@ onMounted(async () => {
 
           <!-- FLOOD MODE CONTENT -->
           <template v-if="activeCriticalMode === 'flood'">
-            <div class="rounded-2xl border border-red-200 bg-white/90 shadow-sm backdrop-blur-sm p-4">
+            <div class="rounded-2xl border border-teal-200 bg-white/90 shadow-sm backdrop-blur-sm p-4">
               <div class="text-sm font-semibold text-gray-800 flex items-center gap-2 mb-3">
-                <span class="inline-flex items-center justify-center rounded bg-[#dc2626] text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
+                <span class="inline-flex items-center justify-center rounded bg-teal-600 text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
                   ⚠
                 </span>
                 <span>Critical Roads Near Flood</span>
@@ -1385,10 +1386,10 @@ onMounted(async () => {
             </div>
 
             <!-- Flood events list -->
-            <div class="rounded-2xl border border-red-200 bg-white/90 shadow-sm backdrop-blur-sm p-4 min-h-[12rem] flex flex-col">
+            <div class="rounded-2xl border border-teal-200 bg-white/90 shadow-sm backdrop-blur-sm p-4 min-h-[12rem] flex flex-col">
               <div class="flex items-start justify-between mb-2">
                 <div class="text-sm font-semibold text-gray-800 flex items-center gap-2">
-                  <span class="inline-flex items-center justify-center rounded bg-[#dc2626] text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
+                  <span class="inline-flex items-center justify-center rounded bg-teal-600 text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
                     🌧
                   </span>
                   <span>Flood Events</span>
@@ -1403,7 +1404,7 @@ onMounted(async () => {
 
               <div v-else class="max-h-[28vh] overflow-auto">
                 <table class="min-w-full text-sm border border-gray-200">
-                  <thead class="bg-red-50/80 text-red-800 sticky top-0 text-xs uppercase tracking-wide">
+                  <thead class="bg-teal-50/80 text-teal-800 sticky top-0 text-xs uppercase tracking-wide">
                     <tr>
                       <th class="px-2 py-1 border border-gray-200 text-right w-[4rem]">ID</th>
                       <th class="px-2 py-1 border border-gray-200 text-left">Location</th>
@@ -1414,7 +1415,7 @@ onMounted(async () => {
                     <tr
                       v-for="e in filteredEventsCritical"
                       :key="e.flood_id"
-                      class="hover:bg-red-50 cursor-pointer"
+                      class="hover:bg-teal-50 cursor-pointer"
                       :title="`Zoom & draw critical segments for Flood ${e.flood_id}`"
                       @click="onSelectFloodId(e.flood_id)"
                     >
@@ -1434,10 +1435,10 @@ onMounted(async () => {
             </div>
 
             <!-- Critical segments for selected flood -->
-            <div class="rounded-2xl border border-red-200 bg-white/90 shadow-sm backdrop-blur-sm p-4 min-h-[10rem] flex flex-col">
+            <div class="rounded-2xl border border-teal-200 bg-white/90 shadow-sm backdrop-blur-sm p-4 min-h-[10rem] flex flex-col">
               <div class="flex items-start justify-between mb-2">
                 <div class="text-sm font-semibold text-gray-800 flex items-center gap-2">
-                  <span class="inline-flex items-center justify-center rounded bg-[#dc2626] text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
+                  <span class="inline-flex items-center justify-center rounded bg-teal-600 text-white text-[10px] font-bold leading-none h-5 px-2 shadow">
                     🚧
                   </span>
                   <span>Critical Segments</span>
@@ -1457,7 +1458,7 @@ onMounted(async () => {
                 class="max-h-[28vh] overflow-auto"
               >
                 <table class="min-w-full text-sm border border-gray-200">
-                  <thead class="bg-red-50/80 text-red-800 sticky top-0 text-xs uppercase tracking-wide">
+                  <thead class="bg-teal-50/80 text-teal-800 sticky top-0 text-xs uppercase tracking-wide">
                     <tr>
                       <th class="px-2 py-1 border border-gray-200 text-left">Road</th>
                       <th class="px-2 py-1 border border-gray-200 text-left">Type</th>
@@ -1469,7 +1470,7 @@ onMounted(async () => {
                     <tr
                       v-for="(seg, idx) in (lastPayload as any).critical_segments"
                       :key="idx"
-                      class="hover:bg-red-50 cursor-pointer"
+                      class="hover:bg-teal-50 cursor-pointer"
                       @click="highlightSegmentAt(idx)"
                     >
                       <td class="px-2 py-1 border border-gray-200 text-gray-800">
@@ -1501,7 +1502,7 @@ onMounted(async () => {
 
           <!-- ROAD CRITICALITY MODE CONTENT -->
           <template v-else>
-            <div class="rounded-2xl border border-red-200 bg-white/90 shadow-sm backdrop-blur-sm p-4">
+            <div class="rounded-2xl border border-gray-200 bg-white/90 shadow-sm backdrop-blur-sm p-4">
               <div class="text-sm font-semibold text-gray-800 mb-3">Road Criticality</div>
 
               <div class="grid grid-cols-3 gap-2">
@@ -1530,7 +1531,7 @@ onMounted(async () => {
               <div v-if="roadLoading" class="text-sm text-gray-500 mt-1">Loading…</div>
             </div>
 
-            <div class="rounded-2xl border border-red-200 bg-white/90 shadow-sm backdrop-blur-sm p-4 flex-1 min-h-[10rem] flex flex-col">
+            <div class="rounded-2xl border border-gray-200 bg-white/90 shadow-sm backdrop-blur-sm p-4 flex-1 min-h-[10rem] flex flex-col">
               <div class="flex items-start justify-between mb-2">
                 <div class="text-sm font-semibold text-gray-800">
                   {{ roadQuery ? 'Search Results' : 'Top 50 Critical Segments' }}
