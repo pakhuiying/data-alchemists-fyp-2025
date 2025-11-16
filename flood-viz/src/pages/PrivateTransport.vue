@@ -3,7 +3,9 @@ import { ref, computed, nextTick } from 'vue'
 import MapCanvasCar from '@/components/MapCanvasCar.vue'
 import TravelTimeBarChart from '@/components/TravelTimeBarChart.vue'
 import AddressDetailsPanel from '@/components/AddressDetailsPanel.vue'
+import TransportModeToggle from '@/components/TransportModeToggle.vue'  
 import { getOnemapCarRoute } from '@/api/api'
+
 const USE_MOCK = false
 
 const startAddress = ref('143 Victoria St, Singapore 188019')
@@ -43,7 +45,6 @@ function decodePolyline(str: string): [number, number][] {
 function normalizeToPolylineList(route: any): [number, number][][] {
   if (!route) return []
 
-  // 1) encoded polyline in `route_geometry` / `encoded`
   if (typeof route?.route_geometry === 'string') {
     return [decodePolyline(route.route_geometry)]
   }
@@ -51,7 +52,6 @@ function normalizeToPolylineList(route: any): [number, number][][] {
     return [decodePolyline(route.encoded)]
   }
 
-  // 2) direct list like [[lon,lat] or [lat,lon]]
   const direct = route.polyline || route.path || route.points
   if (Array.isArray(direct) && direct.length && Array.isArray(direct[0])) {
     const guess = direct[0] as any
@@ -60,14 +60,12 @@ function normalizeToPolylineList(route: any): [number, number][][] {
     const mapped: [number, number][] = direct.map((p: any): [number, number] => {
       const a = Number(p[0])
       const b = Number(p[1])
-      // force tuple return
       return looksLonLat ? [b, a] : [a, b]
     })
 
     return [mapped]
   }
 
-  // 3) GeoJSON-like
   const gj = route.geometry || route.geojson || route.shape
   if (gj && gj.type && Array.isArray(gj.coordinates)) {
     if (gj.type === 'LineString') {
@@ -191,59 +189,43 @@ const chartEntry = computed(() => {
   const r = selectedRouteRaw.value
   if (!r) return null
 
-  // 1. Baseline (non-flooded) travel time in seconds
   const baselineSecondsMaybe = sec(
     r?.route_summary?.total_time ??
     r?.summary?.duration_s
   )
 
-  // If we can't get a baseline, we can't chart.
   if (baselineSecondsMaybe === undefined || baselineSecondsMaybe === null) {
     return null
   }
 
-  // From here on, baselineSeconds is guaranteed number
   const baselineSeconds: number = baselineSecondsMaybe
 
-  // 2. Flood penalties (extra delay in seconds to add)
   const sim = r.time_travel_simulation || simulation.value || {}
 
-  // Helper to build each scenario row.
-  // We convert delaySeconds (penalty) into total trip time (baseline + delay),
-  // because the chart expects scenario.duration_s to be TOTAL trip time.
   function buildScenario(label: string, delaySeconds: any) {
     const delay_s = sec(delaySeconds)
     if (delay_s === undefined || delay_s === null) return null
     return {
       scenario: label,
-      duration_s: baselineSeconds + delay_s, // total under this scenario
+      duration_s: baselineSeconds + delay_s,
     }
   }
 
-  // 3. Build scenarios
   const scenariosList = [
-    // Baseline row, no extra delay:
     { scenario: 'Baseline (normal traffic)', duration_s: baselineSeconds },
-
     buildScenario('5 km/h flood',  sim['5kph_total_duration']),
     buildScenario('10 km/h flood', sim['10kph_total_duration']),
     buildScenario('20 km/h flood', sim['20kph_total_duration']),
     buildScenario('45 km/h flood', sim['45kph_total_duration']),
-    // optionally include higher ones:
-    // buildScenario('72 km/h flood', sim['72kph_total_duration']),
-    // buildScenario('81 km/h flood', sim['81kph_total_duration']),
-    // buildScenario('90 km/h flood', sim['90kph_total_duration']),
   ].filter(Boolean) as { scenario: string; duration_s: number }[]
 
   if (!scenariosList.length) return null
 
   return {
-    // This is used by the chart to compute "baseMin"
     duration_s: baselineSeconds,
-
     floodSummary: {
-      baseline_s: baselineSeconds,    // used for deltaMin calculation
-      scenarios: scenariosList,       // rows for rendering
+      baseline_s: baselineSeconds,
+      scenarios: scenariosList,
     },
   }
 })
@@ -397,5 +379,8 @@ async function fetchRoute() {
         </div>
       </div>
     </div>
+
+    <!-- 🔘 Public / Private toggle floating at bottom -->
+    <TransportModeToggle />
   </div>
 </template>

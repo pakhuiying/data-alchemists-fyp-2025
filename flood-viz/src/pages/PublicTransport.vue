@@ -7,6 +7,7 @@ import MapCanvas from '@/components/MapCanvas.vue'
 import TravelTimeBarChart from '@/components/TravelTimeBarChart.vue'
 import { useUrlStateSync } from '@/components/useUrlStateSync'
 import { getBusesAffectedByFloods, getBusRouteByService } from '@/api/api'
+import TransportModeToggle from '@/components/TransportModeToggle.vue'  // ⬅️ NEW
 
 useUrlStateSync()
 const store = useAppStore()
@@ -568,6 +569,8 @@ async function drawServiceRouteFromBackend(serviceNo: string | number) {
         </div>
       </section>
     </div>
+
+    <!-- 🔁 Public / Private transport switch -->
+    <TransportModeToggle />
   </div>
 </template>
-
