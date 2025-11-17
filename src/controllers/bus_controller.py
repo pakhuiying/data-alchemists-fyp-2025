@@ -293,21 +293,41 @@ def get_bus_route():
     if matched.empty:
         return jsonify({"error": f"No route found for bus service {service}"}), 404
 
-    matched = matched.copy()  
+    matched = matched.copy()
+    
+    # Extract direction from shape_id (e.g., "85:1_1" -> direction 1)
     matched["direction"] = matched["shape_id"].str.split(":").str[-1].str.split("_").str[0].astype(int)
-
-    matched = matched.sort_values(["direction", "shape_pt_sequence"])
-
-    merged_routes = []
-    for direction, group in matched.groupby("direction", sort=False):
-        coords = group[["shape_pt_lat", "shape_pt_lon"]].values.tolist()
+    
+    # Get unique shape_ids per direction
+    shape_groups = matched.groupby("direction")["shape_id"].unique()
+    
+    route_data = []
+    
+    for direction, shape_ids in shape_groups.items():
+        # Strategy 1: Use the shape with the most points (most detailed/complete route)
+        best_shape_id = None
+        max_points = 0
         
-        merged_routes.append({
-            "direction": direction,  
+        for shape_id in shape_ids:
+            point_count = len(matched[matched["shape_id"] == shape_id])
+            if point_count > max_points:
+                max_points = point_count
+                best_shape_id = shape_id
+        
+        # Get coordinates for the best shape only
+        shape_data = matched[matched["shape_id"] == best_shape_id].sort_values("shape_pt_sequence")
+        coords = shape_data[["shape_pt_lat", "shape_pt_lon"]].values.tolist()
+        
+        route_data.append({
+            "direction": int(direction),
+            "shape_id": best_shape_id,  # Include for debugging
             "coordinates": coords
         })
-
+    
+    # Sort by direction
+    route_data = sorted(route_data, key=lambda x: x["direction"])
+    
     return jsonify({
         "service": service,
-        "directions": merged_routes
+        "directions": route_data
     }), 200
