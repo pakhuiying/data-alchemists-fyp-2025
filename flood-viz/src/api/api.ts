@@ -529,7 +529,6 @@ export async function getBusTripsDelay(
   })
 }
 
-
 export async function getOnemapCarRoute(params: {
   start_address: string
   end_address: string

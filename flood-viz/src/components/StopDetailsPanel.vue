@@ -17,23 +17,6 @@ function toLonLat(p: [number, number]) {
   return `${lon},${lat}`
 }
 
-/** Zoom the map to this direction’s geometry (roadPath preferred) */
-function viewDirectionOnMap(d: {
-  roadPath?: [number, number][],
-  points?: [number, number][],
-}) {
-  const coords = (Array.isArray(d?.roadPath) && d.roadPath.length >= 2)
-    ? d.roadPath
-    : (Array.isArray(d?.points) && d.points.length >= 2)
-      ? d.points
-      : []
-
-  if (!coords.length) return
-
-  ;(store as any)._fitBoundsCoords = coords
-  ;(store as any).setActiveTab?.('stops')
-}
-
 function clearMapRoutes() {
   try { currentRouteAbort?.abort() } catch {}
   currentRouteAbort = null
@@ -604,7 +587,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- ====== Selected stop detail (no live arrivals anymore) ====== -->
+    <!-- ====== Selected stop detail ====== -->
     <div
       v-if="store.selectedStopLoading"
       class="text-sm text-gray-500"
