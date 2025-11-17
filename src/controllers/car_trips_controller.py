@@ -108,25 +108,19 @@ def compute_detour_route(G, node_route, flooded_segments):
     if not flooded_segments:
         return None  
 
-  
-    G_detour = copy.deepcopy(G)
-
-
+    flooded_geoms = {seg["geometry"] for seg in flooded_segments}
     PENALTY_FACTOR = 1000
-
-    for seg in flooded_segments:
-        road_geom = seg["geometry"]
-        for u, v, key, data in G.edges(keys=True, data=True):
-            geom = data.get("geometry")
-            if geom and geom.wkt == road_geom:
-                if "length" in data:
-                    data["length"] = data["length"] * PENALTY_FACTOR
-
+    
+    def weight_function(u, v, data):
+        geom = data.get("geometry")
+        if geom and geom.wkt in flooded_geoms:
+            return data.get("length", 1) * PENALTY_FACTOR
+        return data.get("length", 1)
+    
     try:
-       
         orig_node = node_route[0]
         dest_node = node_route[-1]
-        new_node_route = nx.shortest_path(G_detour, orig_node, dest_node, weight="length")
+        new_node_route = nx.shortest_path(G, orig_node, dest_node, weight=weight_function)
         return new_node_route
     except:
         return None  
@@ -138,7 +132,6 @@ def get_car_route():
     if not start_address or not end_address:
         return jsonify({"error": "start_address and end_address are required"}), 400
 
- 
     def geocode_address(address):
         result = gmaps.geocode(address)
         if not result:
@@ -162,15 +155,17 @@ def get_car_route():
 
     route_coords = [(G.nodes[n]['y'], G.nodes[n]['x']) for n in node_route]
 
-    # --- Flood + Speed Delay ---
     speeds = {
         "5kph": 5, "10kph": 10, "20kph": 20,
         "45kph": 45, "72kph": 72, "81kph": 81,
         "90kph": 90  # baseline
     }
+    
+    # Precompute speed in m/s
+    speeds_mps = {label: speed * 1000 / 3600 for label, speed in speeds.items()}
 
     flooded_segments = []
-    total_delay = {k: 0 for k in speeds.keys()}
+    total_delay = {k: 0.0 for k in speeds.keys()}
     route_total_length_m = 0
 
     for u, v in zip(node_route[:-1], node_route[1:]):
@@ -190,30 +185,29 @@ def get_car_route():
 
         flooded = any(geom.intersects(b) for b in flood_buffers)
         if flooded:
-            delays = {}
-            for label, speed in speeds.items():
-                speed_mps = speed * 1000 / 3600
-                time_sec = length_m / speed_mps
-                delays[label] = time_sec
-
+            delays = {label: length_m / speed_mps for label, speed_mps in speeds_mps.items()}
             normal = delays["90kph"]
+            
+            delays_with_suffix = {}
             for label in speeds.keys():
                 delay = delays[label] - normal
-                delays[label + "_delay"] = delay
+                delays_with_suffix[label] = delays[label]
+                delays_with_suffix[label + "_delay"] = delay
                 total_delay[label] += delay
 
             flooded_segments.append({
                 "road_name": edge.get("name", "Unnamed Road"),
                 "geometry": geom.wkt,
                 "length_m": length_m,
-                "travel_time_seconds": delays
+                "travel_time_seconds": delays_with_suffix
             })
 
-    normal_time_sec = route_total_length_m / (90 * 1000 / 3600)
+    normal_time_sec = route_total_length_m / speeds_mps["90kph"]
 
-    estimated_total_travel_time_seconds = {}
-    for label, delay_val in total_delay.items():
-        estimated_total_travel_time_seconds[label] = normal_time_sec + delay_val
+    estimated_total_travel_time_seconds = {
+        label: normal_time_sec + delay_val 
+        for label, delay_val in total_delay.items()
+    }
 
     detour_node_route = compute_detour_route(G, node_route, flooded_segments)
 
@@ -224,8 +218,8 @@ def get_car_route():
             for u, v in zip(detour_node_route[:-1], detour_node_route[1:])
         )
         detour_total_travel_time_seconds = {
-            label: detour_length_m / (speed * 1000 / 3600)
-            for label, speed in speeds.items()
+            label: detour_length_m / speed_mps
+            for label, speed_mps in speeds_mps.items()
         }
         has_detour = True
     else:
