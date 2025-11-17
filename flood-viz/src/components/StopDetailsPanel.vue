@@ -1,19 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/store/app'
-import { getAllBusStops, getBusStopByCode, getOneMapPtRoute } from '@/api/api'
+import { getAllBusStops, getOneMapPtRoute } from '@/api/api'
 
 const { mode = 'route' } = defineProps<{
   mode?: 'route' | 'itinerary'
 }>()
 
 const store = useAppStore()
-
-let BUS_ROUTES_CACHE: any[] | null = null
-let BUS_ROUTES_PROMISE: Promise<any[]> | null = null
-
-type ServiceDirStops = Record<string, Record<number, string[]>>
-let SERVICE_INDEX_PROMISE: Promise<ServiceDirStops> | null = null
+const isItinerary = computed(() => mode === 'itinerary')
 
 let currentRouteAbort: AbortController | null = null
 
@@ -63,37 +58,9 @@ function clearMapRoutes() {
   destText.value = ''
 
   store.clearSelection?.()
-  arrivals.value = null
-  arrivalsLoading.value = false
-  arrivalsError.value = null
 }
 
-async function buildServiceIndex(): Promise<ServiceDirStops> {
-  if (SERVICE_INDEX_PROMISE) return SERVICE_INDEX_PROMISE
-  SERVICE_INDEX_PROMISE = (async () => {
-    const rows = await loadBusRoutes()
-    const idx: ServiceDirStops = Object.create(null)
-    const key = (r:any) => `${r.ServiceNo}|${r.Direction}`
-    const groups = new Map<string, any[]>()
-
-    for (const r of rows) {
-      const k = key(r)
-      if (!groups.has(k)) groups.set(k, [])
-      groups.get(k)!.push(r)
-    }
-
-    for (const [k, arr] of groups) {
-      arr.sort((a,b) => Number(a.StopSequence) - Number(b.StopSequence))
-      const [svcStr, dirStr] = k.split('|')
-      const svc = String(svcStr)
-      const dir = Number(dirStr)
-      if (!idx[svc]) idx[svc] = {}
-      idx[svc][dir] = arr.map(x => String(x.BusStopCode))
-    }
-    return idx
-  })()
-  return SERVICE_INDEX_PROMISE
-}
+/* ───────────── OSRM helpers ───────────── */
 
 type OsrmRoute = { path: [number, number][], distance_m: number, duration_s: number }
 
@@ -139,99 +106,7 @@ async function osrmRouteViaChunked(points: [number,number][], chunkSize = 90, si
   return { path: joined, distance_m: dist, duration_s: dura }
 }
 
-async function computeRoadPathForSegment(codes: string[]): Promise<OsrmRoute | null> {
-  const points: [number,number][] = []
-  for (const c of codes) {
-    const p = stopIndexByCode.value[c]
-    if (p) points.push([p.lat, p.lon])
-  }
-  if (points.length < 2) return null
-
-  const estimatedLen = points.length * 24
-  const useChunked = estimatedLen > 7000
-  const res = useChunked
-    ? await osrmRouteViaChunked(points, 90)
-    : await osrmRouteVia(points).catch(() => osrmRouteViaChunked(points, 90))
-  return res && res.path.length >= 2 ? res : null
-}
-
-async function osrmRouteTwoStops(a: {lat:number; lon:number}, b:{lat:number; lon:number}): Promise<OsrmRoute | null> {
-  const url = `https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=full&geometries=geojson&steps=false`
-  const r = await fetch(url)
-  if (!r.ok) throw new Error(`OSRM ${r.status}`)
-  const j = await r.json()
-  const route = j?.routes?.[0]
-  const coords = route?.geometry?.coordinates
-  if (!Array.isArray(coords)) return null
-  return {
-    path: coords.map(([lon,lat]:[number,number]) => [lat,lon]) as [number,number][],
-    distance_m: Number(route?.distance ?? 0),
-    duration_s: Number(route?.duration ?? 0),
-  }
-}
-
-type DirectCandidate = {
-  serviceNo: string
-  dir: number
-  stopCodes: string[]
-  iA: number
-  iB: number
-  hops: number
-}
-
-async function findDirectCandidates(aCode: string, bCode: string): Promise<DirectCandidate[]> {
-  const idx = await buildServiceIndex()
-  const out: DirectCandidate[] = []
-  for (const svc of Object.keys(idx)) {
-    const dirMap = idx[svc]
-    for (const dirStr of Object.keys(dirMap)) {
-      const dir = Number(dirStr)
-      const seq = dirMap[dir]
-      const iA = seq.indexOf(aCode)
-      const iB = seq.indexOf(bCode)
-      if (iA >= 0 && iB > iA) {
-        out.push({ serviceNo: svc, dir, stopCodes: seq, iA, iB, hops: iB - iA })
-      }
-    }
-  }
-  out.sort((a,b) => a.hops - b.hops)
-  return out
-}
-
-function latLonFromCode(code: string): [number, number] | null {
-  const p = stopIndexByCode.value[code]
-  if (!p) return null
-  return [p.lat, p.lon]
-}
-
-async function loadBusRoutes(): Promise<any[]> {
-  if (BUS_ROUTES_CACHE) return BUS_ROUTES_CACHE
-  if (!BUS_ROUTES_PROMISE) {
-    BUS_ROUTES_PROMISE = fetch('/data/bus_routes.json', { cache: 'force-cache' })
-      .then(r => {
-        if (!r.ok) throw new Error(`fetch bus_routes.json ${r.status}`)
-        return r.json()
-      })
-      .then(arr => (BUS_ROUTES_CACHE = Array.isArray(arr) ? arr : []))
-      .catch(err => { BUS_ROUTES_PROMISE = null; throw err })
-  }
-  return BUS_ROUTES_PROMISE
-}
-
-async function getBusRoutes(busNumber: any, opts: { direction?: 1 | 2 } = {}) {
-  const allRoutes = await loadBusRoutes()
-  const svc = String(busNumber)
-  const filtered = allRoutes.filter((r: any) => {
-    if (String(r.ServiceNo) !== svc) return false
-    if (opts.direction && Number(r.Direction) !== opts.direction) return false
-    return true
-  })
-  filtered.sort((a: any, b: any) =>
-    Number(a.Direction) - Number(b.Direction) ||
-    Number(a.StopSequence) - Number(b.StopSequence)
-  )
-  return filtered
-}
+/* ───────────── Bus stops index (for drawing legs) ───────────── */
 
 type StopIdx = { id: string; code: string; name: string; lat: number; lon: number; q: string }
 const allStops = ref<StopIdx[]>([])
@@ -247,22 +122,6 @@ const stopIndexByCode = computed<Record<string, { lat:number; lon:number; name:s
   return m
 })
 
-/** ---------- OneMap PT (address) state ---------- */
-const ptLoading = ref(false)
-const ptError = ref<string | null>(null)
-
-/** ---------- UI state ---------- */
-const originText = ref<string>('') // can be stop name/code OR a free-form address
-const destText = ref<string>('')   // same as above
-const originHover = ref(0)
-const destHover   = ref(0)
-
-/** ---------- Arrival cards ---------- */
-const arrivals = ref<any[] | null>(null)
-const arrivalsLoading = ref(false)
-const arrivalsError = ref<string | null>(null)
-
-/** ---------- Helpers ---------- */
 function pickStopFields(s: any) {
   const lat = s.lat ?? s.latitude ?? s.stop_lat
   const lon = s.lon ?? s.lng ?? s.longitude ?? s.stop_lon
@@ -281,123 +140,14 @@ function norm(s: any) {
     .trim()
 }
 
-function searchStops(query: string) {
-  const q = norm(query)
-  if (!q) return []
-  const scored = []
-  for (const s of allStops.value) {
-    const inName = s.q.includes(q)
-    const codePrefix = s.code.startsWith(query.trim())
-    if (inName || codePrefix) {
-      const score =
-        (codePrefix ? 100 : 0) +
-        (s.name.toLowerCase().startsWith(q) ? 50 : 0) -
-        s.name.length
-      scored.push([score, s] as const)
-    }
-  }
-  return scored.sort((a,b) => b[0]-a[0]).slice(0, 12).map(([,s]) => s)
+function latLonFromCode(code: string): [number, number] | null {
+  const p = stopIndexByCode.value[code]
+  if (!p) return null
+  return [p.lat, p.lon]
 }
 
-const originSuggests = computed(() => searchStops(originText.value))
-const destSuggests   = computed(() => searchStops(destText.value))
+/* ───────────── Itinerary + flood helpers ───────────── */
 
-async function selectStopFor(which: 'origin'|'dest', s: StopIdx) {
-  if (!s) return
-  const coords = { lat: s.lat, lon: s.lon }
-  const stopCode = s.code
-
-  if (which === 'origin') {
-    ;(store as any).setOrigin?.(coords)
-    ;(store as any).setOriginStopCode?.(stopCode)
-    originText.value = `${s.name} (${stopCode})`
-    originHover.value = 0
-  } else {
-    ;(store as any).setDestination?.(coords)
-    ;(store as any).setDestStopCode?.(stopCode)
-    destText.value = `${s.name} (${stopCode})`
-    destHover.value = 0
-  }
-
-  ;(store as any).highlightStop?.({ role: which, stop: { lat: s.lat, lon: s.lon, code: stopCode, name: s.name }})
-  ;(store as any).flyTo?.(coords)
-
-  store.selectStop(stopCode)
-  const detail = await getBusStopByCode(stopCode)
-  store.setSelectedStop(detail)
-  store.setActiveTab('stops')
-}
-
-function onKeyNav(e: KeyboardEvent, which: 'origin'|'dest') {
-  const list = which === 'origin' ? originSuggests.value : destSuggests.value
-  const idxRef = which === 'origin' ? originHover : destHover
-  if (!list.length) return
-
-  if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    idxRef.value = (idxRef.value + 1) % list.length
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    idxRef.value = (idxRef.value - 1 + list.length) % list.length
-  } else if (e.key === 'Enter') {
-    e.preventDefault()
-    selectStopFor(which, list[idxRef.value])
-  }
-}
-
-function mins(n?: number) {
-  if (!Number.isFinite(n)) return '-'
-  return `${Math.round(Number(n) / 60)} min`
-}
-
-async function copyItinerary(d: any) {
-  const dist = Number.isFinite(d?.distance_m) ? `${(d.distance_m/1000).toFixed(2)} km` : '-'
-  const dura = Number.isFinite(d?.duration_s) ? mins(d.duration_s) : '-'
-  const lines = [
-    `Bus: ${(store as any).serviceRouteOverlay?.serviceNo ?? ''} (Dir ${d?.dir ?? '-'})`,
-    `Distance: ${dist}, Duration: ${dura}`,
-    `Stops (${Array.isArray(d?.stopCodes) ? d.stopCodes.length : 0}):`,
-  ]
-  for (const code of (d?.stopCodes ?? [])) {
-    const name = stopIndexByCode.value[code]?.name ?? 'Stop'
-    lines.push(` - ${name} (${code})`)
-  }
-  try {
-    await navigator.clipboard.writeText(lines.join('\n'))
-    alert('Itinerary copied!')
-  } catch {
-    alert('Copy failed.')
-  }
-}
-
-async function fetchArrivalsRaw(stopId: string) {
-  const url = `https://arrivelah2.busrouter.sg/?id=${encodeURIComponent(stopId)}`
-  const r = await fetch(url, { method: 'GET' })
-  if (!r.ok) throw new Error(`arrivelah2 ${r.status}`)
-  return await r.json()
-}
-
-async function fetchArrivalsForSelected() {
-  const s: any = store.selectedStop
-  const stopId = s?.stop_code ?? s?.stop_id ?? s?.code
-  if (!stopId) { arrivals.value = null; return }
-
-  arrivalsLoading.value = true
-  arrivalsError.value = null
-  try {
-    const data = await fetchArrivalsRaw(String(stopId))
-    arrivals.value = Array.isArray(data?.services) ? data.services : []
-  } catch (e: any) {
-    arrivalsError.value = e?.message || 'Failed to load arrivals'
-    arrivals.value = null
-  } finally {
-    arrivalsLoading.value = false
-  }
-}
-
-watch(() => store.selectedStop, () => { fetchArrivalsForSelected() }, { immediate: true })
-
-/* ---------------- Flood timing helpers ---------------- */
 function toNumOrUndefined(val: unknown): number | undefined {
   if (typeof val === 'number' && Number.isFinite(val)) return val
   if (Array.isArray(val) && val.length && Number.isFinite(val[0] as any)) return Number(val[0])
@@ -454,15 +204,6 @@ function summarizeFloodDurations(legs: any[]) {
   }
 }
 
-function totalTimeMinutes(
-  it: { duration_s: number, floodSummary?: { baseline_s?: number } },
-  scenarioDur_s: number
-) {
-  const baselineBus = it.floodSummary?.baseline_s ?? 0
-  const total_s = it.duration_s + (scenarioDur_s - baselineBus)
-  return Math.max(0, Math.round(total_s / 60))
-}
-
 function legStops(leg: any): string[] {
   if (!leg?.transitLeg || leg?.mode !== 'BUS') return []
   const arr: string[] = []
@@ -477,18 +218,21 @@ function legStops(leg: any): string[] {
   if (b) arr.push(b)
   return arr.filter((c, i) => i === 0 || c !== arr[i - 1])
 }
+
 function legStatus(leg: any): 'flooded' | 'clear' {
   const flag = String(leg?.overall_bus_route_status || '').toLowerCase()
   if (flag === 'flooded') return 'flooded'
   if (flag === 'clear') return 'clear'
   return legIsFlooded(leg) ? 'flooded' : 'clear'
 }
+
 function legChipStyle(leg: any) {
   const s = legStatus(leg)
   return s === 'flooded'
     ? { bg: '#fee2e2', text: '#b91c1c', ring: 'rgba(239,68,68,.25)' }
     : { bg: '#dbeafe', text: '#1d4ed8', ring: 'rgba(59,130,246,.25)' }
 }
+
 function routeLabel(leg: any) {
   return leg?.routeShortName || leg?.route || 'BUS'
 }
@@ -496,6 +240,22 @@ function routeLabel(leg: any) {
 /* colors for flooded vs clear polylines */
 const BASE_COLOR = '#2563eb'
 const FLOODED_COLOR = '#dc2626'
+
+async function computeRoadPathForSegment(codes: string[]): Promise<OsrmRoute | null> {
+  const points: [number,number][] = []
+  for (const c of codes) {
+    const p = stopIndexByCode.value[c]
+    if (p) points.push([p.lat, p.lon])
+  }
+  if (points.length < 2) return null
+
+  const estimatedLen = points.length * 24
+  const useChunked = estimatedLen > 7000
+  const res = useChunked
+    ? await osrmRouteViaChunked(points, 90)
+    : await osrmRouteVia(points).catch(() => osrmRouteViaChunked(points, 90))
+  return res && res.path.length >= 2 ? res : null
+}
 
 async function buildColoredPolylinesFromItinerary(it: any) {
   const legs: any[] = Array.isArray(it?.legs) ? it.legs : []
@@ -555,6 +315,8 @@ async function buildColoredPolylinesFromItinerary(it: any) {
   return { polylines, segments, stopCodes: segmentCodes, points, roadPath }
 }
 
+/* ───────────── Itinerary state ───────────── */
+
 type BuiltItinerary = {
   duration_s: number
   transfers: number
@@ -568,6 +330,19 @@ type BuiltItinerary = {
 }
 const ptItins = ref<BuiltItinerary[]>([])
 const selectedItinIdx = ref<number>(0)
+
+/** OneMap PT (address) state */
+const ptLoading = ref(false)
+const ptError = ref<string | null>(null)
+
+/** UI state: plain address text fields */
+const originText = ref<string>('') // address only
+const destText   = ref<string>('') // address only
+
+function mins(n?: number) {
+  if (!Number.isFinite(n)) return '-'
+  return `${Math.round(Number(n) / 60)} min`
+}
 
 function applyItineraryToMap(i: number) {
   const it = ptItins.value[i]
@@ -638,136 +413,6 @@ async function queryPtRouteViaOneMap() {
   }
 }
 
-/** ---------- Stop→Stop best route (same service, no transfer) ---------- */
-const hasOrigin = computed(() => Boolean((store as any).origin?.lat && (store as any).origin?.lon))
-const hasDest = computed(() => Boolean((store as any).destination?.lat && (store as any).destination?.lon))
-
-async function queryBestBusRoute() {
-  if (!store.originStopCode || !store.destStopCode) {
-    alert('Pick origin and destination bus stops from the suggestions first. For address-to-address, use “Find best bus itinerary”.')
-    return
-  }
-  const aCode = store.originStopCode
-  const bCode = store.destStopCode
-  if (aCode === bCode) {
-    alert('Origin and destination are the same stop.')
-    return
-  }
-
-  const candidates = await findDirectCandidates(String(aCode), String(bCode))
-  if (!candidates.length) {
-    const a = stopIndexByCode.value[aCode]
-    const b = stopIndexByCode.value[bCode]
-    const res = a && b ? await osrmRouteTwoStops(a, b) : null
-    if (res && res.path.length >= 2) {
-      ;(store as any).setServiceRouteOverlay?.({
-        serviceNo: `${aCode} → ${bCode}`,
-        directions: [{
-          dir: 1,
-          points: res.path,
-          stopCodes: [aCode, bCode],
-          roadPath: res.path,
-          distance_m: res.distance_m,
-          duration_s: res.duration_s,
-        }]
-      })
-      ;(store as any).setActiveTab?.('stops')
-      ;(store as any).fitToOverlayBounds?.()
-      return
-    }
-    alert('No direct service found between the two stops. (Transfers not implemented yet)')
-    return
-  }
-
-  const best = candidates[0]
-  const segmentCodes = best.stopCodes.slice(best.iA, best.iB + 1)
-  const osrmRes = await computeRoadPathForSegment(segmentCodes)
-  const points: [number,number][] = segmentCodes
-    .map(c => latLonFromCode(c))
-    .filter(Boolean) as [number,number][]
-
-  ;(store as any).setServiceRouteOverlay?.({
-    serviceNo: best.serviceNo,
-    directions: [{
-      dir: best.dir,
-      points,
-      stopCodes: segmentCodes,
-      roadPath: osrmRes?.path ?? undefined,
-      distance_m: osrmRes?.distance_m,
-      duration_s: osrmRes?.duration_s,
-    }]
-  } as any)
-
-  ;(store as any).setActiveTab?.('stops')
-  ;(store as any).fitToOverlayBounds?.()
-}
-
-/** Draw service route (for "Show route" in arrivals) */
-async function drawServiceRoute(serviceNo: string) {
-  if (!serviceNo) return
-
-  if (currentRouteAbort) currentRouteAbort.abort()
-  currentRouteAbort = new AbortController()
-  const { signal } = currentRouteAbort
-
-  const routes = await getBusRoutes(serviceNo)
-  if (!Array.isArray(routes) || routes.length === 0) {
-    alert(`No route found for service ${serviceNo}`)
-    return
-  }
-
-  const byDir = new Map<number, any[]>()
-  for (const r of routes) {
-    const dir = Number(r.Direction ?? r.direction ?? 1)
-    if (!byDir.has(dir)) byDir.set(dir, [])
-    byDir.get(dir)!.push(r)
-  }
-
-  const directions: Array<any> = []
-  for (const [dir, arr] of byDir.entries()) {
-    arr.sort((a,b) => Number(a.StopSequence) - Number(b.StopSequence))
-    const points: [number,number][] = []
-    const stopCodes: string[] = []
-    for (const row of arr) {
-      const code = String(row.BusStopCode ?? row.busStopCode ?? '')
-      const p = stopIndexByCode.value[code]
-      if (p && Number.isFinite(p.lat) && Number.isFinite(p.lon)) {
-        points.push([p.lat, p.lon])
-        stopCodes.push(code)
-      }
-    }
-    if (points.length >= 2) directions.push({ dir, points, stopCodes })
-  }
-
-  if (!directions.length) {
-    alert(`Service ${serviceNo}: no plottable points`)
-    return
-  }
-
-  ;(store as any).setServiceRouteOverlay?.({ serviceNo, directions })
-
-  await Promise.all(directions.map(async (d) => {
-    try {
-      const estimatedLen = d.points.length * 24
-      const useChunked = estimatedLen > 7000
-      const res = useChunked
-        ? await osrmRouteViaChunked(d.points, 90, signal)
-        : await osrmRouteVia(d.points, signal).catch(() => osrmRouteViaChunked(d.points, 90, signal))
-
-      if (res && res.path.length >= 2) {
-        ;(d as any).roadPath = res.path
-        ;(d as any).distance_m = res.distance_m
-        ;(d as any).duration_s = res.duration_s
-      }
-    } catch {}
-  }))
-
-  ;(store as any).setServiceRouteOverlay?.({
-    serviceNo,
-    directions: directions.map(d => ({ ...d }))
-  })
-}
-
 /** ---------- lifecycle ---------- */
 onMounted(async () => {
   const rows = await getAllBusStops()
@@ -776,100 +421,47 @@ onMounted(async () => {
     .filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lon) && s.code)
     .map(s => ({ ...s, q: norm(`${s.name} ${s.code}`) }))
   loaded.value = true
-  buildServiceIndex().catch(() => {})
 })
 </script>
 
 <template>
   <div class="bg-white rounded shadow p-3 relative z-[12000]">
-    <div class="text-base font-semibold mb-2">Stops</div>
+    <div class="text-base font-semibold mb-2">
+      {{ isItinerary ? 'Addresses' : 'Stops' }}
+    </div>
 
     <div class="space-y-2 mb-3">
       <!-- Starts At -->
-      <label class="block relative">
-        <div class="text-xs text-gray-600 mb-1">Starts At</div>
+      <label class="block">
+        <div class="text-xs text-gray-600 mb-1">
+          {{ isItinerary ? 'Start address' : 'Starts At' }}
+        </div>
         <input
           v-model="originText"
           type="text"
-          placeholder="Type stop name/code or an address"
+          :placeholder="isItinerary ? 'Type a start address' : 'Type stop name/code or an address'"
           class="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-          @keydown="onKeyNav($event, 'origin')"
-          @focus="originHover = 0"
           autocomplete="off"
         />
-        <div
-          v-if="loaded && originText && originSuggests.length"
-          class="absolute left-0 right-0 mt-1 z-20 bg-white border rounded shadow"
-        >
-          <ul class="max-h-64 overflow-auto text-sm">
-            <li
-              v-for="(s,i) in originSuggests"
-              :key="'o-' + s.code"
-              :class="[
-                'px-2 py-1 cursor-pointer flex items-center justify-between',
-                i===originHover ? 'bg-blue-50' : 'hover:bg-gray-50'
-              ]"
-              @mouseenter="originHover = i"
-              @mousedown.prevent="selectStopFor('origin', s)"
-            >
-              <span class="truncate">{{ s.name }}</span>
-              <span class="text-xs text-gray-500 ml-2 shrink-0">{{ s.code }}</span>
-            </li>
-          </ul>
-        </div>
       </label>
 
       <!-- Ends At -->
-      <label class="block relative mt-2">
-        <div class="text-xs text-gray-600 mb-1">Ends At</div>
+      <label class="block mt-2">
+        <div class="text-xs text-gray-600 mb-1">
+          {{ isItinerary ? 'End address' : 'Ends At' }}
+        </div>
         <input
           v-model="destText"
           type="text"
-          placeholder="Type stop name/code or an address"
+          :placeholder="isItinerary ? 'Type a destination address' : 'Type stop name/code or an address'"
           class="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-          @keydown="onKeyNav($event, 'dest')"
-          @focus="destHover = 0"
           autocomplete="off"
         />
-        <div
-          v-if="loaded && destText && destSuggests.length"
-          class="absolute left-0 right-0 mt-1 z-20 bg-white border rounded shadow"
-        >
-          <ul class="max-h-64 overflow-auto text-sm">
-            <li
-              v-for="(s,i) in destSuggests"
-              :key="'d-' + s.code"
-              :class="[
-                'px-2 py-1 cursor-pointer flex items-center justify-between',
-                i===destHover ? 'bg-blue-50' : 'hover:bg-gray-50'
-              ]"
-              @mouseenter="destHover = i"
-              @mousedown.prevent="selectStopFor('dest', s)"
-            >
-              <span class="truncate">{{ s.name }}</span>
-              <span class="text-xs text-gray-500 ml-2 shrink-0">{{ s.code }}</span>
-            </li>
-          </ul>
-        </div>
       </label>
 
       <!-- Action buttons row -->
-      <div class="flex items-center gap-2 flex-wrap">
-        <!-- BLUE: only in 'route' mode -->
-        <button
-          v-if="mode === 'route'"
-          class="inline-flex items-center gap-2 rounded bg-blue-600 text-white px-3 py-1.5 text-sm hover:bg-blue-700 disabled:opacity-60"
-          @click="queryBestBusRoute"
-          title="Find best bus route between selected stops"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M5 6h14a2 2 0 012 2v7a3 3 0 01-3 3h-1l1 2m-8-2H8l-1 2M5 6V4a2 2 0 012-2h10a2 2 0 012 2v2M5 6h14"/>
-          </svg>
-          Find best bus route
-        </button>
-
-        <!-- PURPLE: only in 'itinerary' mode -->
+      <div class="flex items-center gap-2 flex-wrap mt-3">
+        <!-- PURPLE: only in 'itinerary' mode (address-to-address) -->
         <button
           v-if="mode === 'itinerary'"
           class="inline-flex items-center gap-2 rounded bg-violet-600 text-white px-3 py-1.5 text-sm hover:bg-violet-700 disabled:opacity-60"
@@ -902,8 +494,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- ====== Itinerary list ======
-         only relevant in itinerary mode -->
+    <!-- ====== Itinerary list (address-based) ====== -->
     <div
       v-if="mode === 'itinerary' && ptItins.length"
       class="mb-4"
@@ -1013,7 +604,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- ====== Selected stop detail + arrivals ====== -->
+    <!-- ====== Selected stop detail (no live arrivals anymore) ====== -->
     <div
       v-if="store.selectedStopLoading"
       class="text-sm text-gray-500"
@@ -1070,202 +661,7 @@ onMounted(async () => {
         </ul>
       </div>
 
-      <div
-        v-if="arrivalsLoading"
-        class="text-sm text-gray-500 mt-3"
-      >
-        Loading arrivals…
-      </div>
-
-      <div
-        v-else-if="arrivalsError"
-        class="text-sm text-rose-600 mt-3"
-      >
-        {{ arrivalsError }}
-      </div>
-
-      <div
-        v-else-if="arrivals && arrivals.length"
-        class="mt-3"
-      >
-        <div
-          v-if="(store as any).serviceRouteOverlay"
-          class="mt-4"
-        >
-          <div
-            class="rounded-xl border border-gray-200 bg-white/80 backdrop-blur shadow-sm p-4"
-          >
-            <div class="flex items-center gap-2">
-              <span
-                class="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-600/10"
-              >
-                Selected route
-              </span>
-              <div class="text-base font-semibold">
-                {{ (store as any).serviceRouteOverlay.serviceNo }}
-              </div>
-            </div>
-
-            <!-- Each direction card -->
-            <div
-              v-for="(d, i) in (store as any).serviceRouteOverlay.directions"
-              :key="i"
-              class="mt-3"
-            >
-              <div class="flex items-center gap-2 text-sm">
-                <div class="font-medium">Direction {{ d.dir }}</div>
-                <div class="text-gray-400">•</div>
-                <div
-                  v-if="Number.isFinite(d.distance_m)"
-                  class="text-gray-700"
-                >
-                  ~ {{ (d.distance_m / 1000).toFixed(2) }} km
-                </div>
-                <div
-                  v-if="Number.isFinite(d.duration_s)"
-                  class="text-gray-700"
-                >
-                  • ~ {{ Math.round(d.duration_s / 60) }} min
-                </div>
-                <div class="text-gray-400">•</div>
-                <div class="text-gray-700">
-                  {{
-                    Array.isArray(d.stopCodes)
-                      ? (d.stopCodes.length - 1)
-                      : 0
-                  }} stops
-                </div>
-                <div class="ml-auto text-xs text-gray-500">
-                  geometry:
-                  {{ d.roadPath ? 'OSRM road' : 'stop-to-stop' }}
-                </div>
-              </div>
-
-              <!-- Action buttons for this direction -->
-              <div class="mt-2 flex items-center gap-2">
-                <button
-                  class="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 active:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
-                  @click="viewDirectionOnMap(d)"
-                >
-                  Fit to route
-                </button>
-                <button
-                  class="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 active:bg-gray-100"
-                  @click="copyItinerary(d)"
-                >
-                  Copy itinerary
-                </button>
-              </div>
-
-              <details class="mt-2 rounded-md bg-gray-50 p-3 open:bg-gray-100">
-                <summary class="cursor-pointer select-none text-sm text-gray-700">
-                  Show stops
-                </summary>
-                <ol class="mt-2 space-y-1">
-                  <li
-                    v-for="(code, idx) in (d.stopCodes || [])"
-                    :key="code"
-                    class="flex items-center gap-2 text-sm"
-                  >
-                    <span
-                      class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-white text-[11px]"
-                    >
-                      {{ idx + 1 }}
-                    </span>
-                    <span class="truncate">
-                      {{ stopIndexByCode[code]?.name || 'Stop' }}
-                    </span>
-                    <span class="text-xs text-gray-500">
-                      ({{ code }})
-                    </span>
-                  </li>
-                </ol>
-              </details>
-            </div>
-          </div>
-        </div>
-
-        <div class="text-sm font-medium mb-2">Live arrivals</div>
-        <div class="space-y-2">
-          <div
-            v-for="svc in arrivals"
-            :key="svc.no"
-            class="border rounded-md p-2 flex items-center justify-between"
-          >
-            <div class="flex items-center gap-3">
-              <div class="text-base font-semibold tabular-nums">
-                {{ svc.no }}
-              </div>
-              <div class="text-xs text-gray-500">
-                <div>{{ svc.operator }}</div>
-                <div
-                  v-if="svc.next?.time"
-                  class="text-[11px]"
-                >
-                  ETA:
-                  {{ Math.round((svc.next?.duration_ms ?? 0) / 60000) }}
-                  min
-                </div>
-              </div>
-              <button
-                class="inline-flex items-center gap-1.5 rounded-md bg-yellow-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-yellow-700 active:bg-yellow-800 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2 transition-colors"
-                title="Show this service route on map"
-                @click="drawServiceRoute(svc.no)"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                  <path
-                    d="M6 3a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3v2a1 1 0 1 0 2 0v-2h8v2a1 1 0 1 0 2 0v-2a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H6zm0 2h12a1 1 0 0 1 1 1v6H5V6a1 1 0 0 1 1-1zm1.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"
-                  />
-                </svg>
-                Show route
-              </button>
-            </div>
-
-            <div class="flex items-center gap-2">
-              <span
-                class="px-2 py-0.5 rounded text-[11px] bg-gray-100 text-gray-600"
-              >
-                {{ (svc.next?.load || '-').toUpperCase() }}
-              </span>
-              <span
-                v-if="svc.next?.feature === 'WAB'"
-                class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 text-[11px]"
-                title="Wheelchair Accessible"
-              >
-                WAB
-              </span>
-              <span class="text-[11px] text-gray-500">
-                {{ svc.next?.type || '-' }}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <details class="mt-2">
-          <summary class="text-xs text-gray-500 cursor-pointer">
-            More times
-          </summary>
-          <ul class="mt-2 space-y-1 text-xs text-gray-700">
-            <li
-              v-for="svc in arrivals"
-              :key="svc.no + '-more'"
-            >
-              <span class="font-medium">{{ svc.no }}</span>
-              →
-              <span>next2: {{ Math.round((svc.next2?.duration_ms ?? 0) / 60000) }} min</span>,
-              <span>next3: {{ Math.round((svc.next3?.duration_ms ?? 0) / 60000) }} min</span>
-            </li>
-          </ul>
-        </details>
-      </div>
-
-      <div
-        v-else
-        class="text-sm text-gray-500 mt-3"
-      >
-        No live arrivals.
-      </div>
-
+      <!-- Raw JSON (optional debug) -->
       <details class="mt-3">
         <summary class="cursor-pointer text-xs text-gray-500">
           Raw
@@ -1277,5 +673,3 @@ onMounted(async () => {
     </div>
   </div>
 </template>
-
-
