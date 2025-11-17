@@ -4,10 +4,11 @@ import { ref, computed, nextTick } from 'vue'
 import MapCanvasCar from '@/components/MapCanvasCar.vue'
 import TravelTimeBarChart from '@/components/TravelTimeBarChart.vue'
 import AddressDetailsPanel from '@/components/AddressDetailsPanel.vue'
+import TransportModeToggle from '@/components/TransportModeToggle.vue'  
 import { getOnemapCarRoute } from '@/api/api'
 
 
-const USE_MOCK = true
+const USE_MOCK = false
 
 const MOCK_ROUTE_RESPONSE: any = {
   detour_comparison: {
@@ -746,5 +747,6 @@ async function fetchRoute() {
         </div>
       </div>
     </div>
+    <TransportModeToggle />
   </div>
 </template>

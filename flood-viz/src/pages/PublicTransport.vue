@@ -7,7 +7,7 @@ import MapCanvas from '@/components/MapCanvas.vue'
 import TravelTimeBarChart from '@/components/TravelTimeBarChart.vue'
 import { useUrlStateSync } from '@/components/useUrlStateSync'
 import { getBusesAffectedByFloods, getBusRouteByService } from '@/api/api'
-import TransportModeToggle from '@/components/TransportModeToggle.vue'  // ⬅️ NEW
+import TransportModeToggle from '@/components/TransportModeToggle.vue'  
 
 useUrlStateSync()
 const store = useAppStore()
