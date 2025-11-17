@@ -132,15 +132,13 @@ def extract_route_geometry(G, node_route):
     for u, v in zip(node_route[:-1], node_route[1:]):
         edge = G.get_edge_data(u, v, 0)
         if edge and 'geometry' in edge:
-            # Use the detailed geometry from the edge
+        
             geom = edge['geometry']
-            # Add all points except the last one (to avoid duplicates)
+           
             route_coords.extend([(pt[1], pt[0]) for pt in geom.coords[:-1]])
         else:
-            # Fallback to straight line between nodes if no geometry
             route_coords.append((G.nodes[u]['y'], G.nodes[u]['x']))
     
-    # Add the final node
     route_coords.append((G.nodes[node_route[-1]]['y'], G.nodes[node_route[-1]]['x']))
     
     return route_coords
@@ -173,7 +171,7 @@ def get_car_route():
     except:
         return jsonify({"error": "Could not compute route using GraphML"}), 500
 
-    # Use the new function to extract detailed geometry
+    
     route_coords = extract_route_geometry(G, node_route)
 
     speeds = {
@@ -236,7 +234,6 @@ def get_car_route():
     detour_node_route = compute_detour_route(G, node_route, flooded_segments)
 
     if detour_node_route:
-        # Use the new function for detour geometry as well
         detour_coords = extract_route_geometry(G, detour_node_route)
         detour_length_m = sum(
             G.get_edge_data(u, v, 0).get("length", 0)
