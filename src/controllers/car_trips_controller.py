@@ -202,11 +202,14 @@ def get_car_route():
                 "travel_time_seconds": delays_with_suffix
             })
 
-    normal_time_sec = route_total_length_m / speeds_mps["90kph"]
-
-    estimated_total_travel_time_seconds = {
-        label: normal_time_sec + delay_val 
-        for label, delay_val in total_delay.items()
+    normal_time_sec = {
+        "5kph":   route_total_length_m / speeds_mps["5kph"],
+        "10kph":  route_total_length_m / speeds_mps["10kph"],
+        "20kph":  route_total_length_m / speeds_mps["20kph"],
+        "45kph":  route_total_length_m / speeds_mps["45kph"],
+        "72kph":  route_total_length_m / speeds_mps["72kph"],
+        "81kph":  route_total_length_m / speeds_mps["81kph"],
+        "90kph":  route_total_length_m / speeds_mps["90kph"]
     }
 
     detour_node_route = compute_detour_route(G, node_route, flooded_segments)
@@ -230,7 +233,7 @@ def get_car_route():
     detour_comparison = {}
     if has_detour:
         for label in speeds.keys():
-            flooded_time = estimated_total_travel_time_seconds[label]
+            flooded_time = normal_time_sec[label] + total_delay[label]
             detour_time = detour_total_travel_time_seconds[label]
             detour_comparison[label] = {
                 "flooded_route_time_sec": flooded_time,
@@ -244,7 +247,6 @@ def get_car_route():
         "flooded_segments": flooded_segments,
         "total_delay_seconds": total_delay,
         "normal_travel_time_seconds": normal_time_sec,
-        "estimated_total_travel_time_seconds": estimated_total_travel_time_seconds,
         "has_detour": has_detour,
         "detour_route_geometry": detour_coords,
         "detour_total_travel_time_seconds": detour_total_travel_time_seconds,
