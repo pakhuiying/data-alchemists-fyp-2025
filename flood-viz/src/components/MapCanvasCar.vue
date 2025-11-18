@@ -1,4 +1,3 @@
-<!-- File: src/components/MapCanvasCar.vue -->
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import * as L from 'leaflet'

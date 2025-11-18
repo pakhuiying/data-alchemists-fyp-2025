@@ -7,6 +7,8 @@ type Entry = {
     baseline_s?: number
     scenarios?: { scenario: string; duration_s: number }[]
   }
+  /** false = absolute mode (no pink delay bars, per-row absolute times) */
+  showDelayBars?: boolean
 }
 
 const props = withDefaults(defineProps<{
@@ -49,6 +51,51 @@ function minutesTotal(entry: any, floodedDur_s: number) {
 const series = computed(() => {
   const e = props.entry
   if (!e) return []
+
+  const showDelay = e.showDelayBars !== false
+
+  // ── ABSOLUTE MODE (no pink bars, each row = its own total time) ──
+  if (!showDelay) {
+    const baselineSeconds =
+      e.floodSummary?.baseline_s ?? e.duration_s ?? 0
+    const baseAbsMin = Math.max(
+      0,
+      Math.round(baselineSeconds / 60)
+    )
+
+    const out: Array<{
+      label: string
+      baseMin: number
+      totalMin: number
+      deltaMin: number
+    }> = []
+
+    // Non-flooded row
+    out.push({
+      label: 'Non-flooded',
+      baseMin: baseAbsMin,
+      totalMin: baseAbsMin,
+      deltaMin: 0,
+    })
+
+    // Each scenario = full grey bar (absolute time), no delay segment
+    for (const sc of e.floodSummary?.scenarios ?? []) {
+      const totMin = Math.max(
+        0,
+        Math.round(sc.duration_s / 60)
+      )
+      out.push({
+        label: sc.scenario,
+        baseMin: totMin,
+        totalMin: totMin,
+        deltaMin: 0,
+      })
+    }
+
+    return out
+  }
+
+  // ── ORIGINAL DELAY MODE (pink bars) ──
   const baseMin = Math.round(e.duration_s / 60)
 
   const out: Array<{

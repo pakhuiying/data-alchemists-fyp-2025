@@ -279,6 +279,7 @@ const routes = computed(() => {
   const items = list.map((r: any, i: number) => {
     const lines = normalizeToPolylineList(r)
 
+    // ── duration (seconds) ─────────────────────────────
     const rawDuration = Number(
       r?.summary?.duration_s ??
         r?.route_summary?.total_time ??
@@ -287,19 +288,28 @@ const routes = computed(() => {
         r?.time_s ??
         r?.time
     )
-    const duration_s = Number.isFinite(rawDuration) ? rawDuration : undefined
 
-    let distance_m = Number(
+    const duration_s: number | undefined =
+      Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : undefined
+
+    // ── distance (meters) ─────────────────────────────
+    let distance_m: number | undefined
+
+    const rawDistance = Number(
       r?.summary?.distance_m ??
         r?.route_summary?.total_distance ??
         r?.distance_m ??
         r?.distance ??
         r?.length_m
     )
-    if (!Number.isFinite(distance_m) && lines.length && lines[0].length > 1) {
+
+    if (Number.isFinite(rawDistance) && rawDistance > 0) {
+      distance_m = rawDistance
+    } else if (lines.length && lines[0].length > 1) {
+      // fallback: compute from first polyline
       distance_m = polylineLengthMetersLatLon(lines[0])
     }
-    if (!Number.isFinite(distance_m)) distance_m = undefined
+    // else leave distance_m as undefined
 
     return {
       idx: i,
@@ -323,6 +333,7 @@ const selectedRouteRaw = computed(() => {
   return list[idx]
 })
 
+
 /* ───────────────────── Endpoints for A/B markers ───────────────────── */
 
 const endpoints = computed(() => {
@@ -345,49 +356,53 @@ const chartEntry = computed(() => {
   const r = routeResp.value as any
   if (!r) return null
 
-  const normal = r.normal_travel_time_seconds
-  if (!normal || typeof normal !== 'object') return null
-
-  const baseline45 = sec(normal['45kph'])
-  if (baseline45 == null) return null
-
-  const speeds: Array<'5kph' | '10kph' | '20kph'> = ['5kph', '10kph', '20kph']
-
   const selected = selectedRouteRaw.value as any | null
-  const kind: 'flooded' | 'detour' | 'other' =
-    selected?.__kind === 'detour'
-      ? 'detour'
-      : selected?.__kind === 'flooded'
-      ? 'flooded'
-      : 'other'
+  const isDetour = selected?.__kind === 'detour'
 
   const scenariosList: { scenario: string; duration_s: number }[] = []
+  let baseline45: number | undefined
+  let showDelayBars = true
 
-  if (kind === 'detour' && r.detour_total_travel_time_seconds) {
-    // Detour route selected: compare baseline vs detour total travel time at 5/10/20 km/h
-    const detourTimes = r.detour_total_travel_time_seconds as Record<string, number>
+  if (isDetour) {
+    // ───────── DETOUR: absolute times, no pink bars ─────────
+    const detourTotals = r.detour_total_travel_time_seconds
+    if (!detourTotals || typeof detourTotals !== 'object') return null
+
+    baseline45 = sec(detourTotals['45kph'])
+    if (baseline45 == null) return null
+
     const labelMap: Record<string, string> = {
       '5kph': '5 km/h (detour)',
       '10kph': '10 km/h (detour)',
       '20kph': '20 km/h (detour)',
     }
+    const speeds: Array<'5kph' | '10kph' | '20kph'> = ['5kph', '10kph', '20kph']
 
     for (const key of speeds) {
-      const totalSec = sec(detourTimes[key])
-      if (totalSec == null) continue
+      const t = sec(detourTotals[key])
+      if (t == null) continue
       scenariosList.push({
         scenario: labelMap[key],
-        duration_s: totalSec, // full travel time; chart computes delta vs baseline
+        duration_s: t,          // absolute detour travel time (seconds)
       })
     }
+
+    showDelayBars = false
   } else {
-    // Flooded shortest path or fallback: baseline vs flooded slowdown at 5/10/20 km/h
+    // ───────── FLOODED SHORTEST PATH: baseline + delay (pink) ─────────
+    const normal = r.normal_travel_time_seconds
+    if (!normal || typeof normal !== 'object') return null
+
+    baseline45 = sec(normal['45kph'])
+    if (baseline45 == null) return null
+
     const totalDelay = r.total_delay_seconds || {}
     const labelMap: Record<string, string> = {
       '5kph': '5 km/h (delay)',
       '10kph': '10 km/h (delay)',
       '20kph': '20 km/h (delay)',
     }
+    const speeds: Array<'5kph' | '10kph' | '20kph'> = ['5kph', '10kph', '20kph']
 
     for (const key of speeds) {
       const delaySec = sec(totalDelay[key])
@@ -395,12 +410,14 @@ const chartEntry = computed(() => {
       const totalTravelSec = baseline45 + delaySec
       scenariosList.push({
         scenario: labelMap[key],
-        duration_s: totalTravelSec,
+        duration_s: totalTravelSec,   // baseline + extra delay
       })
     }
+
+    showDelayBars = true
   }
 
-  if (!scenariosList.length) return null
+  if (!scenariosList.length || baseline45 == null) return null
 
   return {
     duration_s: baseline45,
@@ -408,6 +425,7 @@ const chartEntry = computed(() => {
       baseline_s: baseline45,
       scenarios: scenariosList,
     },
+    showDelayBars,
   }
 })
 
