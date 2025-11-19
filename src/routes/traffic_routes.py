@@ -10,7 +10,7 @@ traffic_route = Blueprint('traffic_route', __name__)
 
 @traffic_route.route('/road_max_traffic_flow', methods=['GET'])
 @swag_from({
-    "tags": ["Roads"],
+    "tags": ["Traffic Routes"],
     "responses": {
         200: {
             "description": "List of road max traffic flow records",
@@ -39,7 +39,7 @@ def all_road_max_traffic_flow():
 @traffic_route.route('/road_max_traffic_flow/id/', methods=['GET'])
 
 @swag_from({
-    "tags": ["Roads"],
+    "tags": ["Traffic Routes"],
     "responses": {
         200: {
             "description": "List of road max traffic flow records for given road IDs",

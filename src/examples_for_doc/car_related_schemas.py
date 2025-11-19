@@ -10,6 +10,8 @@ car_trips_schema = {
             "start_area_code": {
                 "type": "string",
                 "description": "Area code for trip origin"
+
+
             },
             "start_lat": {
                 "type": "number",
@@ -82,4 +84,27 @@ car_trips_schema = {
         }
         
     }
+}
+
+
+car_trips_detailed_schema = {
+"type": "array",
+"items": {
+    "type": "object",
+    "properties": {
+        "detour_comparison": {"type": "object", "description": "Map of speed profiles to detour/flooded times"},
+        "detour_route_geometry": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+        "detour_total_travel_time_seconds": {"type": "object"},
+        "flooded_segments": {"type": "array", "items": {"type": "object", "properties": {
+            "geometry": {"type": "string"},
+            "length_m": {"type": "number"},
+            "road_name": {"type": "string"},
+            "travel_time_seconds": {"type": "object"}
+        }}},
+        "has_detour": {"type": "boolean"},
+        "normal_travel_time_seconds": {"type": "object"},
+        "overall_route_status": {"type": "string"},
+        "route_geometry": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}}
+    }
+}
 }
