@@ -435,7 +435,7 @@ def get_critical_road_segments_near_flood():
         buffer_m = float(request.args.get("buffer_m", 50))
 
         if not flood_id:
-            return jsonify({"error": "Missing flood_id"}), 400
+            return jsonify({"error": "flood_id parameter is required"}), 400
 
         flood = flood_events_df[flood_events_df["flood_id"] == int(flood_id)]
         if flood.empty:
@@ -549,3 +549,4 @@ def get_unique_flood_events_by_location():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    

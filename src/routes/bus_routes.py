@@ -123,17 +123,79 @@ def bus_trip_segment_by_id(bus_trip_id):
 
 
 @bus_route.route('/bus_trips/end_area_codes', methods=['GET'])
+@swag_from({
+    "tags": ["Bus"],
+    "responses": {
+        200: {
+            "description": "Mapping of end area names to codes",
+            "schema": end_area_codes_schema,
+            "examples": {"application/json": end_area_codes_example}
+        }
+    }
+})
 def bus_trips_end_area_codes():
     return get_unique_end_area_codes()
 
 @bus_route.route('/bus_trip_segments/delay', methods=['GET'])
+@swag_from({
+    "tags": ["Bus"],
+    "description": "Example: GET /bus_trip_segments/delay?start_stop=01013&end_stop=60121",
+    "parameters": [
+        {"name": "start_stop", "in": "query", "type": "string", "required": True, "description": "Origin stop code"},
+        {"name": "end_stop", "in": "query", "type": "string", "required": True, "description": "Destination stop code"}
+    ],
+    "responses": {
+        200: {
+            "description": "Delay information for a bus trip segment",
+            "schema": bus_delayed_schema,
+            "examples": {"application/json": bus_trips_delayed_example}
+        },
+        400: {"description": "Missing required parameters"},
+        404: {"description": "No matching bus trip segment found"}
+    }
+})
 def bus_trip_segments_with_delay():
     return get_bus_trip_segment_delay()
 
 @bus_route.route('/get_route', methods=['GET'])
+@swag_from({
+    "tags": ["Bus"],
+    "description": "Example: GET start_address=pasir+ris+mall end_address=dunman+secondary+school time=07%3A00%3A00",
+    "parameters": [
+        {"name": "start_address", "in": "query", "type": "string", "required": True, "description": "Start address string"},
+        {"name": "end_address", "in": "query", "type": "string", "required": True, "description": "End address string"},
+        {"name": "date", "in": "query", "type": "string", "required": False, "description": "Date (optional)"},
+        {"name": "time", "in": "query", "type": "string", "required": False, "description": "Time (optional)"}
+    ],
+    "responses": {
+        200: {
+            "description": "OneMap route plan (may include augmented bus leg durations)",
+            "schema": get_route_schema,
+            "examples": {"application/json": get_route_example}
+        },
+        400: {"description": "Missing start/end address"},
+        504: {"description": "OneMap API timeout"}
+    }
+})
 def onemap_route():
     return get_onemap_route()
 
 @bus_route.route("/bus/route", methods=["GET"])
+@swag_from({
+    "tags": ["Bus"],
+    "description": "Example: GET /bus/route?service=10",
+    "parameters": [
+        {"name": "service", "in": "query", "type": "string", "required": True, "description": "Bus service number"}
+    ],
+    "responses": {
+        200: {
+            "description": "Bus route geometry by service",
+            "schema": bus_route_schema,
+            "examples": {"application/json": bus_route_example}
+        },
+        400: {"description": "Missing service parameter"},
+        404: {"description": "No route found for service"}
+    }
+})
 def bus_routes():
     return get_bus_route()

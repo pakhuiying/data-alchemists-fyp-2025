@@ -34,12 +34,12 @@ bus_stop_get_example = {
 
 
 bus_trips_get_example ={
-    "12kmh_total_bus_duration": 240,
-    "12kmh_total_duration": 2185,
-    "30kmh_total_bus_duration": 212,
-    "30kmh_total_duration": 2157,
-    "48kmh_total_bus_duration": 205,
-    "48kmh_total_duration": 2150,
+    "10kmh_total_bus_duration": 240,
+    "10kmh_total_duration": 2185,
+    "20kmh_total_bus_duration": 212,
+    "20kmh_total_duration": 2157,
+    "5kmh_total_bus_duration": 303,
+    "5kmh_total_duration": 2248,
     "5kmh_total_bus_duration": 303,
     "5kmh_total_duration": 2248,
     "bus_trip_id": 13,
@@ -77,9 +77,8 @@ bus_trips_get_example ={
 
 
 bus_trip_segment_example = {
-    "12kmh_flooded_bus_duration": 240,
-    "30kmh_flooded_bus_duration": 212,
-    "48kmh_flooded_bus_duration": 205,
+    "10kmh_flooded_bus_duration": 240,
+    "20kmh_flooded_bus_duration": 212,
     "5kmh_flooded_bus_duration": 303,
     "bus_trip_id": 13,
     "destination_stop_id": "60121",
@@ -99,29 +98,25 @@ bus_trips_delayed_example = {
             "end_lat": 1.35537955952137,
             "end_lon": 103.887346108709,
             "flooded_total_bus_durations": {
-                "12kmh": 240,
-                "30kmh": 212,
-                "48kmh": 205,
+                "10kmh": 240,
+                "20kmh": 212,
                 "5kmh": 303
             },
             "flooded_total_durations": {
-                "12kmh": 2002,
-                "30kmh": 1974,
-                "48kmh": 1967,
+                "10kmh": 2002,
+                "20kmh": 1974,
                 "5kmh": 2065
             },
             "non_flooded_total_bus_duration": 203,
             "non_flooded_total_duration": 1965,
             "overall_bus_delay": {
-                "12kmh": 37,
-                "30kmh": 9,
-                "48kmh": 2,
+                "10kmh": 37,
+                "20kmh": 9,
                 "5kmh": 100
             },
             "overall_total_delay": {
-                "12kmh": 37,
-                "30kmh": 9,
-                "48kmh": 2,
+                "10kmh": 37,
+                "20kmh": 9,
                 "5kmh": 100
             },
             "segments": [
@@ -131,19 +126,85 @@ bus_trips_delayed_example = {
                     "destination_stop_id": "60121",
                     "non_flooded_bus_duration": 203,
                     "flooded_durations": {
-                        "12kmh": 240,
-                        "30kmh": 212,
-                        "48kmh": 205,
+                        "10kmh": 240,
+                        "20kmh": 212,
                         "5kmh": 303
                     },
                     "delays": {
-                        "12kmh": 37,
-                        "30kmh": 9,
-                        "48kmh": 2,
+                        "10kmh": 37,
+                        "20kmh": 9,
                         "5kmh": 100
                     }
                 }
             ]
+        }
+    ]
+}
+
+
+end_area_codes_example = {
+    "Ang Mo Kio": "AM",
+    "Bedok": "BD",
+    "Bishan": "BS",
+    "Boon Lay": "BL",
+    "Bukit Batok": "BK",
+    "Bukit Merah": "BM",
+    "Bukit Panjang": "BP",
+    "Bukit Timah": "BT",
+    "Changi": "CH",
+    "Choa Chu Kang": "CK",
+    "Clementi": "CL",
+    "Downtown": "DT",
+}
+
+
+get_route_example = {
+    "plan": {
+        "date": 1763506800000,
+        "from": {"lat": 1.3727816, "lon": 103.9482223, "name": "Origin"},
+        "itineraries": [
+            {
+                "duration": 1376,
+                "startTime": 1763507169000,
+                "legs": [
+                    {
+                        "mode": "WALK",
+                        "distance": 63.11,
+                        "duration": 52,
+                        "from": {"lat": 1.3727816, "lon": 103.9482223, "name": "Origin"},
+                        "to": {"lat": 1.3724107, "lon": 103.9486593, "name": "PASIR RIS STN EXIT B", "stopCode": "77039"}
+                    },
+                    {
+                        "mode": "BUS",
+                        "route": "518",
+                        "routeId": "518",
+                        "distance": 3276.98,
+                        "duration": 731,
+                        "from": {"name": "PASIR RIS STN EXIT B", "stopCode": "77039"},
+                        "to": {"name": "BLK 390/OPP TAMPINES JC", "stopCode": "76239"},
+                        "overall_bus_route_status": "clear",
+                        "non_flooded_bus_duration": [238],
+                        "5kmh_flooded_bus_duration": [238],
+                        "10kmh_flooded_bus_duration": [238],
+                        "20kmh_flooded_bus_duration": [238]
+                    }
+                ]
+            }
+        ]
+    }
+}
+
+
+bus_route_example = {
+    "service": "10",
+    "directions": [
+        {
+            "direction": 0,
+            "coordinates": [[1.2968, 103.8525], [1.3554, 103.8873]]
+        },
+        {
+            "direction": 1,
+            "coordinates": [[1.3554, 103.8873], [1.2968, 103.8525]]
         }
     ]
 }

@@ -192,5 +192,45 @@ def all_trips_by_id():
   return get_all_car_trips_by_id()
 
 @car_trips_route.route('/car_route', methods=['GET'])
+@swag_from({
+    "tags": ["Car"],
+    "description": "Get driving route between two addresses. Example: `GET /car_route?start_address=143+Victoria+St%2C+Singapore+188019&end_address=961+Bukit+Timah+Rd%2C+Singapore+588179`",
+    "parameters": [
+        {
+            "name": "start_address",
+            "in": "query",
+            "type": "string",
+            "required": True,
+            "description": "Start address (URL-encoded)"
+        },
+        {
+            "name": "end_address",
+            "in": "query",
+            "type": "string",
+            "required": True,
+            "description": "End address (URL-encoded)"
+        }
+    ],
+    "responses": {
+        200: {
+            "description": "Route plan returned by the routing service (OneMap/augmented)",
+            "schema": {"type": "object"},
+            "examples": {
+                "application/json": {
+                    "plan": {"itineraries": [{"legs": [{"mode": "CAR", "duration": 3600}]}]},
+                    "overall_route_status": "ok"
+                }
+            }
+        },
+        400: {
+            "description": "Missing or invalid parameters",
+            "schema": {"type": "object", "properties": {"error": {"type": "string", "example": "start_address and end_address are required"}}}
+        },
+        500: {
+            "description": "Server error",
+            "schema": {"type": "object", "properties": {"error": {"type": "string", "example": "Routing service failed"}}}
+        }
+    }
+})
 def car_route():
-   return get_car_route()
+    return get_car_route()

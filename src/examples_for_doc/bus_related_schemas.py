@@ -38,12 +38,10 @@ bus_trip_schema = {
         "transfers": {"type": "integer", "description": "Number of transfers"},
         "transit_time": {"type": "integer", "description": "Transit time in seconds"},
         "waiting_time": {"type": "integer", "description": "Waiting time in seconds"},
-        "12kmh_total_duration": {"type": "integer", "description": "total trip time at 12km/h total duration in seconds"},
-        "12kmh_total_bus_duration": {"type": "integer","description": "total time spent on bus at 12km/h total duration in seconds"},
-        "30kmh_total_duration": {"type": "integer", "description": "total trip time at 30km/h total duration in seconds"},
-        "30kmh_total_bus_duration": {"type": "integer","description": "total time spent on bus at 30km/h total duration in seconds"},
-        "48kmh_total_duration": {"type": "integer","description": "total trip time at 48km/h total duration in seconds"},
-        "48kmh_total_bus_duration": {"type": "integer","description": "total time spent on bus at 48km/h total duration in seconds"},
+        "10kmh_total_duration": {"type": "integer", "description": "total trip time at 10km/h total duration in seconds"},
+        "10kmh_total_bus_duration": {"type": "integer","description": "total time spent on bus at 10km/h total duration in seconds"},
+        "20kmh_total_duration": {"type": "integer", "description": "total trip time at 20km/h total duration in seconds"},
+        "20kmh_total_bus_duration": {"type": "integer","description": "total time spent on bus at 20km/h total duration in seconds"},
         "5kmh_total_duration": {"type": "integer","description": "total trip time at 5km/h total duration in seconds"},
         "5kmh_total_bus_duration": {"type": "integer","description": "total time spent on bus at 5km/h total duration in seconds"},
         "non_bus_duration": {"type": "integer","description": "Total time spent not on a bus in seconds"},
@@ -58,9 +56,8 @@ bus_trip_schema = {
 bus_trip_segment_schema = {
     "type": "object",
     "properties": {
-        "12kmh_flooded_bus_duration": {"type": "integer", "description": "Duration at 12km/h in flooded conditions"},
-        "30kmh_flooded_bus_duration": {"type": "integer", "description": "Duration at 30km/h in flooded conditions"},
-        "48kmh_flooded_bus_duration": {"type": "integer", "description": "Duration at 48km/h in flooded conditions"},
+        "10kmh_flooded_bus_duration": {"type": "integer", "description": "Duration at 10km/h in flooded conditions"},
+        "20kmh_flooded_bus_duration": {"type": "integer", "description": "Duration at 20km/h in flooded conditions"},
         "5kmh_flooded_bus_duration": {"type": "integer", "description": "Duration at 5km/h in flooded conditions"},
         "bus_trip_id": {"type": "integer", "description": "Bus trip ID"},
         "destination_stop_id": {"type": "string", "description": "ID of the destination stop"},
@@ -87,19 +84,17 @@ bus_delayed_schema = {"type": "object",
                     "end_lon": {"type": "number", "format": "float", "description": "End longitude"},
                     "flooded_total_bus_durations": {
                         "type": "object",
-                        "properties": {
-                            "12kmh": {"type": "integer", "description": "Total bus duration at 12km/h"},
-                            "30kmh": {"type": "integer", "description": "Total bus duration at 30km/h"},
-                            "48kmh": {"type": "integer", "description": "Total bus duration at 48km/h"},
+                            "properties": {
+                            "10kmh": {"type": "integer", "description": "Total bus duration at 10km/h"},
+                            "20kmh": {"type": "integer", "description": "Total bus duration at 20km/h"},
                             "5kmh": {"type": "integer", "description": "Total bus duration at 5km/h"}
                         }
                     },
                     "flooded_total_durations": {
                         "type": "object",
-                        "properties": {
-                            "12kmh": {"type": "integer", "description": "Total duration at 12km/h"},
-                            "30kmh": {"type": "integer", "description": "Total duration at 30km/h"},
-                            "48kmh": {"type": "integer", "description": "Total duration at 48km/h"},
+                            "properties": {
+                            "10kmh": {"type": "integer", "description": "Total duration at 10km/h"},
+                            "20kmh": {"type": "integer", "description": "Total duration at 20km/h"},
                             "5kmh": {"type": "integer", "description": "Total duration at 5km/h"}
                         }
                     },
@@ -107,20 +102,18 @@ bus_delayed_schema = {"type": "object",
                     "non_flooded_total_duration": {"type": "integer", "description": "Non-flooded total duration"},
                     "overall_bus_delay": {
                         "type": "object",
-                        "properties": {
-                            "12kmh": {"type": "integer", "description": "Overall bus delay at 12km/h"},
-                            "30kmh": {"type": "integer", "description": "Overall bus delay at 30km/h"},
-                            "48kmh": {"type": "integer", "description": "Overall bus delay at 48km/h"},
-                            "5kmh": {"type": "integer", "description": "Overall bus delay at 5km/h"}
+                            "properties": {
+                                        "10kmh": {"type": "integer", "description": "Overall bus delay at 10km/h"},
+                                        "20kmh": {"type": "integer", "description": "Overall bus delay at 20km/h"},
+                                        "5kmh": {"type": "integer", "description": "Overall bus delay at 5km/h"}
                         }
                     },
                     "overall_total_delay": {
                         "type": "object",
-                        "properties": {
-                            "12kmh": {"type": "integer", "description": "Overall total delay at 12km/h"},
-                            "30kmh": {"type": "integer", "description": "Overall total delay at 30km/h"},
-                            "48kmh": {"type": "integer", "description": "Overall total delay at 48km/h"},
-                            "5kmh": {"type": "integer", "description": "Overall total delay at 5km/h"}
+                            "properties": {
+                                        "10kmh": {"type": "integer", "description": "Overall total delay at 10km/h"},
+                                        "20kmh": {"type": "integer", "description": "Overall total delay at 20km/h"},
+                                        "5kmh": {"type": "integer", "description": "Overall total delay at 5km/h"}
                         }
                     },
                     "segments": {
@@ -135,19 +128,119 @@ bus_delayed_schema = {"type": "object",
                                 "flooded_durations": {
                                     "type": "object",
                                     "properties": {
-                                        "12kmh": {"type": "integer", "description": "Flooded Individual Bus duration at 12km/h"},
-                                        "30kmh": {"type": "integer", "description": "Flooded Individual Bus duration at 30km/h"},
-                                        "48kmh": {"type": "integer", "description": "Flooded Individual Bus duration at 48km/h"},
+                                        "10kmh": {"type": "integer", "description": "Flooded Individual Bus duration at 10km/h"},
+                                        "20kmh": {"type": "integer", "description": "Flooded Individual Bus duration at 20km/h"},
                                         "5kmh": {"type": "integer", "description": "Flooded Individual Bus duration at 5km/h"}
                                     }
                                 },
                                 "delays": {
                                     "type": "object",
                                     "properties": {
-                                        "12kmh": {"type": "integer", "description": "Bus segment Flooded delay at 12km/h"},
-                                        "30kmh": {"type": "integer", "description": "Bus segment Flooded delay at 30km/h"},
-                                        "48kmh": {"type": "integer", "description": "Bus segment Flooded delay at 48km/h"},
+                                        "10kmh": {"type": "integer", "description": "Bus segment Flooded delay at 10km/h"},
+                                        "20kmh": {"type": "integer", "description": "Bus segment Flooded delay at 20km/h"},
                                         "5kmh": {"type": "integer", "description": "Bus segment Flooded delay at 5km/h"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+end_area_codes_schema = {
+    "type": "object",
+    "description": "Mapping of end area names to their two-letter codes",
+    "additionalProperties": {"type": "string", "description": "Area code (2-letter)"}
+}
+
+
+bus_route_schema = {
+    "type": "object",
+    "properties": {
+        "service": {"type": "string", "description": "Bus service number"},
+        "directions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "direction": {"type": "integer", "description": "Direction index (0/1)"},
+                    "coordinates": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+                    "flooded_spans": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}},
+                    "flooded_flags": {"type": "array", "items": {"type": "boolean"}}
+                }
+            }
+        }
+    }
+}
+
+get_route_schema = {
+    "type": "object",
+    "description": "OneMap routing response (may include augmented bus leg durations)",
+    "properties": {
+        "plan": {
+            "type": "object",
+            "properties": {
+                "date": {"type": "integer"},
+                "from": {
+                    "type": "object",
+                    "properties": {
+                        "lat": {"type": "number"},
+                        "lon": {"type": "number"},
+                        "name": {"type": "string"}
+                    }
+                },
+                "itineraries": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "duration": {"type": "integer"},
+                            "startTime": {"type": "integer"},
+                            "legs": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "mode": {"type": "string"},
+                                        "distance": {"type": "number"},
+                                        "duration": {"type": "integer"},
+                                        "from": {"type": "object"},
+                                        "to": {"type": "object"},
+                                        "route": {"type": "string"},
+                                        "routeId": {"type": "string"},
+                                        "overall_bus_route_status": {"type": "string"},
+                                        "non_flooded_bus_duration": {
+                                            "oneOf": [
+                                                {"type": "integer"},
+                                                {"type": "array", "items": {"type": "integer"}},
+                                                {"type": "null"}
+                                            ]
+                                        },
+                                        "5kmh_flooded_bus_duration": {
+                                            "oneOf": [
+                                                {"type": "integer"},
+                                                {"type": "array", "items": {"type": "integer"}},
+                                                {"type": "null"}
+                                            ]
+                                        },
+                                        "10kmh_flooded_bus_duration": {
+                                            "oneOf": [
+                                                {"type": "integer"},
+                                                {"type": "array", "items": {"type": "integer"}},
+                                                {"type": "null"}
+                                            ]
+                                        },
+                                        "20kmh_flooded_bus_duration": {
+                                            "oneOf": [
+                                                {"type": "integer"},
+                                                {"type": "array", "items": {"type": "integer"}},
+                                                {"type": "null"}
+                                            ]
+                                        }
                                     }
                                 }
                             }
