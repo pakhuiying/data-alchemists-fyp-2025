@@ -41,7 +41,7 @@
 
         <ul class="text-sm text-gray-700 space-y-2 leading-relaxed">
           <li>
-            <span class="font-semibold text-indigo-700">• Flood Operations View</span> —
+            <span class="font-semibold text-indigo-700">• Flood vulnerabilities View</span> —
             Explore historical flood hotspots, inspect event details, and examine nearby
             critical road segments using network centrality.
           </li>
@@ -73,7 +73,7 @@
 
       <!-- Footer text -->
       <p class="text-xs text-gray-500 text-center mt-8">
-        Built as a student research project — Data Alchemists FYP 2025.
+        Flood Viz 2025
       </p>
     </div>
   </div>
