@@ -15,7 +15,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 G = ox.load_graphml("SG_bus_network.graphml")
 def create_app():
+    
     app = Flask(__name__,template_folder="src/templates")
+    
     load_dotenv()
     print("Checking OneMap token status...")
     token = get_valid_token()  
@@ -36,5 +38,5 @@ def create_app():
 
 if __name__ == '__main__':
     app=create_app()
-
+    CORS(app)
     app.run(debug=True, host='0.0.0.0', port=5000)
