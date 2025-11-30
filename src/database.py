@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 import psycopg2
 from psycopg2.extras import RealDictCursor
-
+import json   
 
 load_dotenv()
 #If using cloud based supabase, use this
@@ -14,7 +14,7 @@ load_dotenv()
 
 
 
-#If using local based postgres, uncomment below this
+# If using local based postgres, uncomment below this
 conn = psycopg2.connect(
     host=os.getenv('POSTGRES_HOST', 'localhost'),
     port=os.getenv('POSTGRES_PORT', '5434'),   # IMPORTANT: docker host port
@@ -26,6 +26,33 @@ conn = psycopg2.connect(
 cursor = conn.cursor()
 
 
+# NEW: simple cache so we only fetch column list once per table
+_COLUMN_CACHE = {}
+
+
+def get_table_columns(conn, table_name):
+    """
+    Return list of column names for a given table in the public schema.
+    Cached so we don't hit information_schema repeatedly.
+    """
+    if table_name in _COLUMN_CACHE:
+        return _COLUMN_CACHE[table_name]
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = %s
+            ORDER BY ordinal_position
+            """,
+            (table_name,),
+        )
+        cols = [row[0] for row in cur.fetchall()]
+
+    _COLUMN_CACHE[table_name] = cols
+    return cols
 
 
 class LocalSupabaseResult:
@@ -88,7 +115,31 @@ class LocalSupabaseTable:
                 )
 
         # Otherwise treat it as a SELECT
-        sql = f"SELECT {self._select} FROM {self.table}"
+        # NEW: build a select clause that auto-converts geom → GeoJSON when using "*"
+        select_clause = self._select
+
+        if self._select.strip() == "*":
+            # Try to introspect columns for this table
+            try:
+                cols = get_table_columns(self.conn, self.table)
+            except Exception:
+                cols = None
+
+            if cols and "geom" in cols:
+                # Rebuild explicit column list, replacing geom with ST_AsGeoJSON(...)
+                select_parts = []
+                for col in cols:
+                    if col == "geom":
+                        select_parts.append('ST_AsGeoJSON("geom")::json AS geom')
+                    else:
+                        # quote to handle spaces / weird names like "daily rainfall total (mm)"
+                        select_parts.append(f'"{col}"')
+                select_clause = ", ".join(select_parts)
+            else:
+                # no geom column, keep "*"
+                select_clause = "*"
+
+        sql = f"SELECT {select_clause} FROM {self.table}"
         params = list(self._params)
 
         if self._where:
@@ -101,7 +152,39 @@ class LocalSupabaseTable:
             cur.execute(sql, params)
             rows = cur.fetchall()
 
-        return LocalSupabaseResult(data=rows, error=None)
+        # NEW: normalize geom → always GeoJSON object
+        processed_rows = []
+        for row in rows:
+            row = dict(row)  # RealDictRow -> plain dict
+
+            if "geom" in row:
+                val = row["geom"]
+
+                # Case 1: already a dict (e.g. Supabase) → leave as is
+                if isinstance(val, dict):
+                    pass
+                # Case 2: JSON text from ST_AsGeoJSON(...)::json
+                elif isinstance(val, str):
+                    new_geom = None
+
+                    # Try parsing as JSON text
+                    try:
+                        new_geom = json.loads(val)
+                    except Exception:
+                        # If that fails, assume it's WKB hex from PostGIS and
+                        # fall back to lat/long if available
+                        if "longitude" in row and "latitude" in row:
+                            new_geom = {
+                                "type": "Point",
+                                "coordinates": [row["longitude"], row["latitude"]],
+                            }
+
+                    if new_geom is not None:
+                        row["geom"] = new_geom
+
+            processed_rows.append(row)
+
+        return LocalSupabaseResult(data=processed_rows, error=None)
 
 
 class LocalSupabaseClient:
