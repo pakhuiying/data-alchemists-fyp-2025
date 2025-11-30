@@ -3,10 +3,10 @@ import requests
 import datetime as dt
 from typing import Optional
 from supabase import create_client, Client
-
+from src.database import supabase
 # ---- Config (Render ENV) ----
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_KEY"]  # server-side only
+# SUPABASE_URL = os.environ["SUPABASE_URL"]
+# SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_KEY"]  # server-side only
 ONEMAP_EMAIL = os.environ["ONEMAP_EMAIL"]
 ONEMAP_PASSWORD = os.environ["ONEMAP_PASSWORD"]
 
@@ -14,7 +14,7 @@ ONEMAP_PASSWORD = os.environ["ONEMAP_PASSWORD"]
 REFRESH_EARLY_SEC = 6 * 3600  # refresh if <6 h left
 
 # ---- Init Supabase client ----
-sb: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+sb= supabase
 
 def _utcnow():
     return dt.datetime.now(dt.timezone.utc)

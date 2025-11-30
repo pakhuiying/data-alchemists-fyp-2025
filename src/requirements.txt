@@ -10,3 +10,4 @@ shapely
 flask-cors
 APScheduler==3.11.0
 scikit-learn
+psycopg2-binary
