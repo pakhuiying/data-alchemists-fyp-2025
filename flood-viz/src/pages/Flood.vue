@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import * as L from 'leaflet'
-import 'leaflet.markercluster' // 🔹 cluster plugin
+import 'leaflet.markercluster' 
 import proj4 from 'proj4'
 import {
   getAllFloodEvents,

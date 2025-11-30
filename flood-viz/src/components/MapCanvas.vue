@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, watch, ref } from 'vue'
 import * as L from 'leaflet'
-import 'leaflet.markercluster' // ← NEW
+import 'leaflet.markercluster' 
 import { useAppStore } from '@/store/app'
 import { getAllFloodEvents, getFloodEventById } from '@/api/api'
 
@@ -21,7 +21,7 @@ let driveRouteLayer: L.LayerGroup | null = null
 
 const store = useAppStore()
 
-/** 🔘 Default flood layer toggle (if not set in store yet) */
+/** Default flood layer toggle (if not set in store yet) */
 if ((store as any).floodLayerEnabled === undefined) {
   (store as any).floodLayerEnabled = true
 }
@@ -358,7 +358,6 @@ function ensureFloodCluster(): L.MarkerClusterGroup {
 }
 
 /* ========== RENDER FLOODS WITH CLUSTERS ========== */
-/* ========== RENDER FLOODS WITH CLUSTERS ========== */
 async function renderFloodEvents(epoch: number) {
   // clear current
   if (floodCluster) {
@@ -535,7 +534,7 @@ watch(() => (store as any).activeTab as UITab | undefined, (tab) => {
   renderLayers()
 })
 
-/** 🔘 Watch the flood layer toggle */
+/** Watch the flood layer toggle */
 watch(
   () => (store as any).floodLayerEnabled,
   (enabled) => {
