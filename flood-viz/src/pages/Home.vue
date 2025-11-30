@@ -1,5 +1,23 @@
-<!-- src/pages/LandingPage.vue -->
 <script setup lang="ts">
+import { ref } from 'vue'
+
+/* ─────────────────────────────
+   VIDEO CAROUSEL STATE
+   ───────────────────────────── */
+const currentSlide = ref(0)
+const totalSlides = 2
+
+function nextSlide() {
+  currentSlide.value = (currentSlide.value + 1) % totalSlides
+}
+
+function prevSlide() {
+  currentSlide.value = (currentSlide.value - 1 + totalSlides) % totalSlides
+}
+
+function goToSlide(n: number) {
+  currentSlide.value = n
+}
 </script>
 
 <template>
@@ -69,7 +87,9 @@
           <div
             class="mt-6 sm:mt-8 mx-auto w-full sm:w-fit rounded-2xl border border-slate-300 bg-white/70 backdrop-blur-md shadow-md"
           >
-            <div class="p-3 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 text-xs sm:text-sm text-slate-600">
+            <div
+              class="p-3 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 text-xs sm:text-sm text-slate-600"
+            >
               💡 Flood-aware routing • Live overlays • Delay analytics
             </div>
           </div>
@@ -128,22 +148,102 @@
         </div>
       </section>
 
-      <!-- VIDEO SECTION -->
+      <!-- VIDEO SECTION (CAROUSEL) -->
       <section id="video" class="py-12 sm:py-16">
         <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h2 class="text-2xl sm:text-3xl font-extrabold mb-4 sm:mb-6">Demo Video</h2>
+          <h2 class="text-2xl sm:text-3xl font-extrabold mb-4 sm:mb-6">Demo Videos</h2>
           <p class="text-slate-600 text-sm sm:text-base max-w-2xl mx-auto mb-6">
-            Watch a walkthrough of how Flood-Viz helps planners and commuters understand flood impacts on the go.
+            Explore our walkthroughs showing how Flood-Viz helps planners and commuters understand flood impacts on the go.
           </p>
-          <div class="video-frame">
-            <iframe
-              class="w-full h-full"
-              src="https://www.youtube.com/embed/25zSy3B9G0M?si=LeQiPKZs5gIMt-p3"
-              title="Flood-Viz Demo Video"
-              frameborder="0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowfullscreen
-            />
+
+          <!-- CAROUSEL WRAPPER -->
+          <div class="relative w-full max-w-4xl mx-auto">
+            <!-- Slides -->
+            <div class="overflow-hidden rounded-xl shadow-lg bg-slate-200/40 backdrop-blur">
+              <div
+                class="whitespace-nowrap transition-transform duration-500"
+                :style="{ transform: `translateX(-${currentSlide * 100}%)` }"
+              >
+                <!-- Slide 1 -->
+                <div class="inline-block w-full">
+                  <div class="video-frame">
+                    <iframe
+                      class="w-full h-full"
+                      src="https://www.youtube.com/embed/25zSy3B9G0M?si=LeQiPKZs5gIMt-p3"
+                      title="Flood-Viz Demo Video 1"
+                      frameborder="0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowfullscreen
+                    ></iframe>
+                  </div>
+                </div>
+
+                <!-- Slide 2 -->
+                <div class="inline-block w-full">
+                  <div class="video-frame">
+                    <iframe
+                      class="w-full h-full"
+                      src="https://www.youtube.com/embed/uT3dUmaStpk?si=18cRmpAIZvqXRN-o"
+                      title="Flood-Viz Demo Video 2"
+                      frameborder="0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowfullscreen
+                    ></iframe>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Prev Button -->
+            <button
+              @click="prevSlide"
+              class="absolute top-1/2 left-2 -translate-y-1/2 bg-white/80 backdrop-blur rounded-full p-2.5 shadow-md hover:bg-white hover:shadow-lg transition flex items-center justify-center"
+              aria-label="Previous video"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                class="w-5 h-5 text-slate-700"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+
+            <!-- Next Button -->
+            <button
+              @click="nextSlide"
+              class="absolute top-1/2 right-2 -translate-y-1/2 bg-white/80 backdrop-blur rounded-full p-2.5 shadow-md hover:bg-white hover:shadow-lg transition flex items-center justify-center"
+              aria-label="Next video"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                class="w-5 h-5 text-slate-700"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+
+            <!-- Dots -->
+            <div class="mt-4 flex justify-center gap-2">
+              <span
+                v-for="n in totalSlides"
+                :key="n"
+                @click="goToSlide(n - 1)"
+                class="cursor-pointer w-3 h-3 rounded-full transition"
+                :class="currentSlide === (n - 1) ? 'bg-blue-600' : 'bg-slate-300'"
+              ></span>
+            </div>
           </div>
         </div>
       </section>
@@ -178,7 +278,7 @@
 }
 
 .video-frame {
-  @apply relative aspect-[16/9] w-full max-w-4xl mx-auto rounded-xl overflow-hidden shadow-lg bg-slate-200/40 backdrop-blur;
+  @apply relative aspect-[16/9] w-full max-w-4xl mx-auto rounded-xl overflow-hidden shadow-lg;
 }
 
 /* Rain animation */
@@ -207,7 +307,6 @@
 }
 </style>
 
-<!-- Global tweaks (not scoped) to avoid stray gutters/scrollbars -->
 <style>
 html,
 body {

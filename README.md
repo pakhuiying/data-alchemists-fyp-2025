@@ -56,8 +56,10 @@ npm run dev
 npm run build
 ```
 
-
-
+### To access flask documentation after running application
+```
+http://localhost:5000/apidocs/#/
+```
 
 
 
